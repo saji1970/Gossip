@@ -1,0 +1,1 @@
+Secure messaging app with end-to-end encryption, group chats, and privacy controls.

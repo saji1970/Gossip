@@ -1,0 +1,196 @@
+PRIVACY POLICY FOR GOSSIPIN
+
+Last Updated: October 10, 2024
+
+1. INTRODUCTION
+
+Welcome to GossipIn ("we," "our," or "us"). We are committed to protecting your privacy and ensuring you have a positive experience while using our mobile application.
+
+This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our mobile application. Please read this privacy policy carefully.
+
+2. INFORMATION WE COLLECT
+
+2.1 Personal Information
+We may collect personal information that you voluntarily provide to us when you:
+- Register for an account (email address, username)
+- Create or join a group
+- Send messages or communicate with other users
+- Upload photos, videos, or other content
+
+2.2 Automatically Collected Information
+When you use our app, we may automatically collect:
+- Device information (model, operating system, unique device identifiers)
+- Usage data (features used, time spent, interactions)
+- Log data (IP address, access times, app crashes)
+
+3. PERMISSIONS WE REQUEST
+
+3.1 CAMERA Permission (android.permission.CAMERA)
+- WHY: To allow you to take photos and videos for sharing in group chats
+- WHEN: Only requested when you tap camera/photo features
+- OPTIONAL: You can use the app without granting camera access
+- DATA STORAGE: Photos/videos are stored locally and optionally uploaded to your groups
+
+3.2 MICROPHONE Permission (android.permission.RECORD_AUDIO)
+- WHY: For voice messages and voice/video calling features
+- WHEN: Only requested when you use voice message or calling features
+- OPTIONAL: Text chat works without microphone access
+- DATA STORAGE: Voice messages are transmitted securely
+
+3.3 STORAGE Permission (READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, READ_MEDIA_VIDEO)
+- WHY: To save and access photos, videos, and documents you want to share
+- WHEN: When you select media to share or save received media
+- OPTIONAL: You can use basic chat features without storage access
+- DATA STORAGE: Media is stored locally on your device
+
+3.4 INTERNET Permission (android.permission.INTERNET)
+- WHY: Required for all app functionality (messaging, authentication, sync)
+- WHEN: Always active when using the app
+- REQUIRED: Essential for the app to function
+- DATA USAGE: Transmits messages, media, and app data
+
+3.5 NETWORK STATE Permission (android.permission.ACCESS_NETWORK_STATE)
+- WHY: To detect internet connectivity and optimize performance
+- WHEN: Always active
+- REQUIRED: Ensures smooth app experience
+- DATA USAGE: Checks connection status only
+
+4. HOW WE USE YOUR INFORMATION
+
+We use the collected information to:
+- Provide and maintain our service
+- Create and manage your account
+- Enable communication between users
+- Send notifications about messages and group activities
+- Improve app performance and user experience
+- Detect and prevent fraud or abuse
+- Comply with legal obligations
+
+5. DATA SHARING AND DISCLOSURE
+
+We do NOT sell your personal information to third parties.
+
+We may share your information only in these circumstances:
+- With other app users: Your username and messages in groups you join
+- Service providers: Third-party services that help us operate (e.g., Firebase for authentication and storage)
+- Legal requirements: If required by law or to protect our rights
+- Business transfers: In case of merger, acquisition, or asset sale
+
+6. DATA SECURITY
+
+We implement industry-standard security measures to protect your data:
+- Encrypted data transmission (HTTPS/TLS)
+- Secure authentication (Firebase Authentication)
+- Access controls and monitoring
+- Regular security updates
+
+However, no method of transmission over the internet is 100% secure. We cannot guarantee absolute security.
+
+7. DATA RETENTION
+
+We retain your information for as long as:
+- Your account is active
+- Needed to provide our services
+- Required by law
+- Necessary for legitimate business purposes
+
+You can delete your account at any time, which will remove your personal data from our active systems.
+
+8. YOUR RIGHTS AND CHOICES
+
+You have the right to:
+- Access your personal information
+- Correct inaccurate data
+- Delete your account and data
+- Opt out of certain data collection
+- Withdraw permission grants (in device settings)
+- Export your data
+
+To exercise these rights, contact us at [Your Contact Email]
+
+9. CHILDREN'S PRIVACY
+
+Our app is not intended for children under 13 years of age. We do not knowingly collect personal information from children under 13. If you believe we have collected information from a child, please contact us immediately.
+
+10. CHANGES TO THIS PRIVACY POLICY
+
+We may update this Privacy Policy from time to time. We will notify you of any changes by:
+- Posting the new Privacy Policy in the app
+- Updating the "Last Updated" date
+- Sending you a notification (for material changes)
+
+Your continued use of the app after changes constitutes acceptance of the updated policy.
+
+11. INTERNATIONAL DATA TRANSFERS
+
+Your information may be transferred to and maintained on servers located outside your country. By using our app, you consent to this transfer. We ensure appropriate safeguards are in place.
+
+12. THIRD-PARTY SERVICES
+
+Our app uses third-party services:
+
+Firebase (Google)
+- Authentication
+- Cloud storage
+- Analytics
+Privacy Policy: https://firebase.google.com/support/privacy
+
+These services have their own privacy policies. We encourage you to review them.
+
+13. DO NOT TRACK SIGNALS
+
+We do not currently respond to Do Not Track (DNT) signals. However, you can control tracking through your device settings.
+
+14. CALIFORNIA PRIVACY RIGHTS (CCPA)
+
+If you are a California resident, you have additional rights:
+- Right to know what personal data is collected
+- Right to delete personal data
+- Right to opt-out of data sales (we don't sell data)
+- Right to non-discrimination
+
+15. GDPR COMPLIANCE (EU Users)
+
+If you are in the European Union, you have rights under GDPR:
+- Right to access
+- Right to rectification
+- Right to erasure
+- Right to restrict processing
+- Right to data portability
+- Right to object
+- Rights related to automated decision-making
+
+Legal basis for processing:
+- Consent: When you grant permissions
+- Contract: To provide our services
+- Legitimate interests: To improve and secure our app
+
+16. CONTACT US
+
+If you have questions about this Privacy Policy or our data practices, contact us:
+
+Email: [Your Contact Email]
+App Name: GossipIn
+Developer: [Your Name/Company]
+
+Response time: We will respond to all requests within 30 days.
+
+17. DATA PROTECTION OFFICER
+
+For GDPR-related inquiries, you may contact our Data Protection Officer at [DPO Email]
+
+18. SUPERVISORY AUTHORITY
+
+EU users have the right to lodge a complaint with a supervisory authority in their country.
+
+CONSENT
+
+By using GossipIn, you consent to this Privacy Policy and agree to its terms.
+
+---
+
+This privacy policy is effective as of October 10, 2024.
+
+© 2024 GossipIn. All rights reserved.
+
+
