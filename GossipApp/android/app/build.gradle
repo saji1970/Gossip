@@ -1,5 +1,4 @@
 apply plugin: "com.android.application"
-apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "com.google.gms.google-services"
 
@@ -68,21 +67,21 @@ def enableProguardInReleaseBuilds = true
  * give correct results when using with locales other than en-US. Note that
  * this variant is about 6MiB larger per architecture than default.
  */
-def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+def jscFlavor = 'org.webkit:android-jsc:+'
 
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.gossipin"
+                                                                                                                    namespace "com.gossipin"
     
     defaultConfig {
         applicationId "com.gossipin"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "1.2.0"
+        versionCode 9
+        versionName "1.4.0"
         
         // Manifest placeholders
         manifestPlaceholders = [usesCleartextTraffic:"false"]
@@ -114,20 +113,22 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            // Disable TurboModule for debug builds
             buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
             buildConfigField "boolean", "IS_HERMES_ENABLED", hermesEnabled.toString()
             debuggable true
+            ndk {
+                debugSymbolLevel 'NONE'
+            }
         }
         release {
             signingConfig signingConfigs.release
-            // Temporarily disable ProGuard to avoid build issues
             minifyEnabled false
-            // shrinkResources false
-            // Disable TurboModule for release builds to avoid PlatformConstants error
             buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
             buildConfigField "boolean", "IS_HERMES_ENABLED", hermesEnabled.toString()
             debuggable false
+            ndk {
+                debugSymbolLevel 'NONE'
+            }
         }
     }
     
@@ -139,6 +140,10 @@ android {
     packagingOptions {
         jniLibs {
             pickFirsts += ['lib/x86/libc++_shared.so', 'lib/x86_64/libc++_shared.so', 'lib/armeabi-v7a/libc++_shared.so', 'lib/arm64-v8a/libc++_shared.so']
+            // Ensure Hermes libraries are included
+            if (hermesEnabled.toBoolean()) {
+                pickFirsts += ['lib/x86/libhermes.so', 'lib/x86_64/libhermes.so', 'lib/armeabi-v7a/libhermes.so', 'lib/arm64-v8a/libhermes.so']
+            }
         }
         resources {
             excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/LICENSE.txt', 'META-INF/license.txt', 'META-INF/NOTICE', 'META-INF/NOTICE.txt', 'META-INF/notice.txt', 'META-INF/ASL2.0', 'META-INF/*.kotlin_module']
@@ -148,16 +153,35 @@ android {
     // Packaging options - fix duplicate file issues
 }
 
-dependencies {
-    // The version of react-native is set by the React Native Gradle Plugin
-    implementation("com.facebook.react:react-android")
-
-    if (hermesEnabled.toBoolean()) {
-        implementation("com.facebook.react:hermes-android")
-    } else {
-        implementation jscFlavor
+// Skip broken symbol stripping task
+tasks.whenTaskAdded { task ->
+    if (task.name == 'stripReleaseDebugSymbols' || task.name == 'stripDebugDebugSymbols') {
+        task.enabled = false
     }
-    
-    // MultiDex support for Samsung devices
-    implementation("androidx.multidex:multidex:2.0.1")
 }
+
+    dependencies {
+        // The version of react-native is set by the React Native Gradle Plugin
+        implementation("com.facebook.react:react-android")
+
+        if (hermesEnabled.toBoolean()) {
+            implementation("com.facebook.react:hermes-android")
+            debugImplementation("com.facebook.react:hermes-android")
+            releaseImplementation("com.facebook.react:hermes-android")
+        } else {
+            // Use the correct JSC flavor for React Native
+            implementation jscFlavor
+            debugImplementation jscFlavor
+            releaseImplementation jscFlavor
+        }
+        
+        // MultiDex support for Samsung devices
+        implementation("androidx.multidex:multidex:2.0.1")
+        
+        // Firebase modules only (these work!)
+        implementation project(':react-native-firebase_app')
+        implementation project(':react-native-firebase_auth')
+        implementation project(':react-native-firebase_firestore')
+    }
+
+apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesAppBuildGradle(project)

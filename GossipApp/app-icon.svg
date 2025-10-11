@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" fill="#FF6B9D" rx="80"/>
+  
+  <!-- Left Cat (listening) -->
+  <g transform="translate(80, 150)">
+    <!-- Body -->
+    <ellipse cx="60" cy="80" rx="50" ry="60" fill="#FFE5E5"/>
+    <!-- Head -->
+    <circle cx="60" cy="40" r="35" fill="#FFE5E5"/>
+    <!-- Left Ear -->
+    <path d="M 40 15 L 30 0 L 45 20 Z" fill="#FFE5E5"/>
+    <!-- Right Ear -->
+    <path d="M 80 15 L 90 0 L 75 20 Z" fill="#FFE5E5"/>
+    <!-- Eye -->
+    <circle cx="55" cy="35" r="3" fill="#333"/>
+    <!-- Whiskers -->
+    <line x1="30" y1="45" x2="10" y2="43" stroke="#333" stroke-width="1.5"/>
+    <line x1="30" y1="50" x2="10" y2="52" stroke="#333" stroke-width="1.5"/>
+    <!-- Surprised expression -->
+    <circle cx="55" cy="50" r="5" fill="none" stroke="#333" stroke-width="2"/>
+  </g>
+  
+  <!-- Right Cat (gossiping/whispering) -->
+  <g transform="translate(280, 150)">
+    <!-- Body -->
+    <ellipse cx="60" cy="80" rx="50" ry="60" fill="#FFF5E5"/>
+    <!-- Head (tilted towards left cat) -->
+    <circle cx="50" cy="40" r="35" fill="#FFF5E5"/>
+    <!-- Left Ear -->
+    <path d="M 30 15 L 20 0 L 35 20 Z" fill="#FFF5E5"/>
+    <!-- Right Ear -->
+    <path d="M 70 15 L 80 0 L 65 20 Z" fill="#FFF5E5"/>
+    <!-- Eye (mischievous) -->
+    <ellipse cx="45" cy="35" rx="4" ry="3" fill="#333"/>
+    <!-- Whiskers -->
+    <line x1="75" y1="45" x2="95" y2="43" stroke="#333" stroke-width="1.5"/>
+    <line x1="75" y1="50" x2="95" y2="52" stroke="#333" stroke-width="1.5"/>
+    <!-- Mouth (smiling/gossiping) -->
+    <path d="M 40 48 Q 45 53 50 48" fill="none" stroke="#333" stroke-width="2"/>
+    <!-- Paw raised (gesturing while gossiping) -->
+    <circle cx="30" cy="70" r="8" fill="#FFF5E5"/>
+  </g>
+  
+  <!-- Speech bubbles/whispers -->
+  <g opacity="0.6">
+    <!-- Small circles representing whispered words -->
+    <circle cx="200" cy="180" r="4" fill="#FFF"/>
+    <circle cx="215" cy="175" r="3" fill="#FFF"/>
+    <circle cx="228" cy="172" r="2" fill="#FFF"/>
+    
+    <circle cx="205" cy="195" r="3" fill="#FFF"/>
+    <circle cx="218" cy="192" r="2.5" fill="#FFF"/>
+    
+    <circle cx="200" cy="210" r="3.5" fill="#FFF"/>
+    <circle cx="213" cy="208" r="2" fill="#FFF"/>
+  </g>
+  
+  <!-- App name text -->
+  <text x="256" y="420" font-family="Arial, sans-serif" font-size="48" font-weight="bold" fill="#FFF" text-anchor="middle">Gossip</text>
+  <text x="256" y="460" font-family="Arial, sans-serif" font-size="32" font-weight="normal" fill="#FFE5E5" text-anchor="middle">In</text>
+</svg>
+
