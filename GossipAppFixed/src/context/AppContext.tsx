@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import firestore from '@react-native-firebase/firestore';
+import { supabase, TABLES } from '../config/supabase';
 import { Group, GroupMember, MemberRole, MemberStatus } from '../utils/GroupStorage';
 
 interface User {
@@ -38,79 +38,127 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Save groups to storage whenever they change
   useEffect(() => {
-    if (initialized) {
+    if (initialized && user) {
       saveGroupsToStorage();
     }
-  }, [groups]);
+  }, [groups, initialized, user]);
 
   const loadUserData = async () => {
     try {
       console.log('🔍 DEBUG: Starting loadUserData...');
       
-      // Load current user from Firestore
-      console.log('🔥 DEBUG: Connecting to Firestore...');
-      const currentUserDoc = await firestore().collection('app_storage').doc('current_user').get();
-      console.log('📄 DEBUG: Firestore connection successful');
-      
-      if (currentUserDoc.exists) {
-        console.log('👤 DEBUG: User document found');
-        const parsedUser = currentUserDoc.data() as User;
-        setUser(parsedUser);
-        
-        // Load groups for this user
-        console.log('👥 DEBUG: Loading groups for user:', parsedUser.uid);
-        const groupsSnapshot = await firestore()
-          .collection('app_storage')
-          .doc('groups')
-          .collection(parsedUser.uid)
-          .get();
-        
-        const parsedGroups: Group[] = [];
-        groupsSnapshot.forEach(doc => {
-          parsedGroups.push(doc.data() as Group);
-        });
-        console.log('📊 DEBUG: Loaded', parsedGroups.length, 'groups');
-        setGroups(parsedGroups);
+      // Get current authenticated user from Supabase
+      console.log('🔥 DEBUG: Connecting to Supabase...');
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      console.log('📄 DEBUG: Supabase connection successful');
+
+      if (authUser) {
+        console.log('👤 DEBUG: User authenticated:', authUser.id);
+
+        // Get user profile from database
+        const { data: profile, error: profileError } = await supabase
+          .from(TABLES.USERS)
+          .select('*')
+          .eq('id', authUser.id)
+          .single();
+
+        if (profileError) {
+          console.error('❌ Error loading profile:', profileError);
+          setInitialized(true);
+          return;
+        }
+
+        if (profile) {
+          const userData: User = {
+            uid: authUser.id,
+            email: profile.email,
+            displayName: profile.display_name,
+            username: profile.username,
+          };
+          setUser(userData);
+
+          // Load user's groups
+          console.log('👥 DEBUG: Loading groups for user:', userData.uid);
+          const { data: groupsData, error: groupsError } = await supabase
+            .from(TABLES.GROUPS)
+            .select('*')
+            .eq('user_id', userData.uid)
+            .order('created_at', { ascending: false });
+
+          if (groupsError) {
+            console.error('❌ Error loading groups:', groupsError);
+          } else {
+            // Convert from database format to app format
+            const loadedGroups: Group[] = (groupsData || []).map((g: any) => ({
+              id: g.id,
+              name: g.name,
+              description: g.description,
+              privacy: g.privacy,
+              termsAndConditions: g.terms_and_conditions,
+              requireApproval: g.require_approval,
+              lastMessage: g.last_message || '',
+              timestamp: g.updated_at || g.created_at,
+              unreadCount: 0,
+              members: g.members || [],
+              createdBy: g.created_by,
+              createdAt: g.created_at,
+            }));
+            console.log('📊 DEBUG: Loaded', loadedGroups.length, 'groups');
+            setGroups(loadedGroups);
+          }
+        }
       } else {
-        console.log('ℹ️ DEBUG: No user document found (first time user)');
+        console.log('ℹ️ DEBUG: No authenticated user');
       }
-      
+
       console.log('✅ DEBUG: App initialization complete');
       setInitialized(true);
     } catch (error) {
       console.error('❌ DEBUG: Error loading user data:', error);
-      console.error('❌ DEBUG: Error details:', JSON.stringify(error, null, 2));
       setInitialized(true);
     }
   };
 
   const saveGroupsToStorage = async () => {
     if (!user) return;
+    
     try {
-      // Save each group to Firestore
-      const batch = firestore().batch();
-      groups.forEach(group => {
-        const docRef = firestore()
-          .collection('app_storage')
-          .doc('groups')
-          .collection(user.uid)
-          .doc(group.id);
-        batch.set(docRef, group);
-      });
-      await batch.commit();
+      // Save or update groups in Supabase
+      for (const group of groups) {
+        const dbGroup = {
+          id: group.id,
+          user_id: user.uid,
+          name: group.name,
+          description: group.description,
+          privacy: group.privacy,
+          terms_and_conditions: group.termsAndConditions,
+          require_approval: group.requireApproval,
+          last_message: group.lastMessage,
+          members: group.members,
+          created_by: group.createdBy,
+          created_at: group.createdAt,
+          updated_at: new Date().toISOString(),
+        };
+
+        await supabase
+          .from(TABLES.GROUPS)
+          .upsert(dbGroup, { onConflict: 'id' });
+      }
     } catch (error) {
-      console.error('Error saving groups to storage:', error);
+      console.error('Error saving groups:', error);
     }
   };
 
   const addGroup = (group: Group) => {
-    setGroups(prev => [...prev, group]);
+    setGroups(prev => [group, ...prev]);
   };
 
   const updateGroup = (groupId: string, updates: Partial<Group>) => {
-    setGroups(prev => prev.map(g => 
-      g.id === groupId ? { ...g, ...updates } : g
-    ));
+    setGroups(prev =>
+      prev.map(group =>
+        group.id === groupId ? { ...group, ...updates } : group
+      )
+    );
   };
 
   const getGroupById = (groupId: string): Group | undefined => {
@@ -118,49 +166,49 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const refreshGroups = () => {
-    setGroups([...groups]);
+    loadUserData();
   };
 
   const updateMemberRole = (groupId: string, memberEmail: string, role: MemberRole) => {
-    setGroups(prev => prev.map(g => {
-      if (g.id === groupId) {
-        return {
-          ...g,
-          members: g.members.map(m => 
+    setGroups(prev =>
+      prev.map(group => {
+        if (group.id === groupId) {
+          const updatedMembers = group.members.map(m =>
             m.email === memberEmail ? { ...m, role } : m
-          )
-        };
-      }
-      return g;
-    }));
+          );
+          return { ...group, members: updatedMembers };
+        }
+        return group;
+      })
+    );
   };
 
   const approveMember = (groupId: string, memberEmail: string, approverEmail: string) => {
-    setGroups(prev => prev.map(g => {
-      if (g.id === groupId) {
-        return {
-          ...g,
-          members: g.members.map(m => 
-            m.email === memberEmail ? { ...m, status: 'approved' as MemberStatus, approvedBy: approverEmail } : m
-          )
-        };
-      }
-      return g;
-    }));
+    setGroups(prev =>
+      prev.map(group => {
+        if (group.id === groupId) {
+          const updatedMembers = group.members.map(m =>
+            m.email === memberEmail
+              ? { ...m, status: 'approved' as MemberStatus, approvedBy: approverEmail }
+              : m
+          );
+          return { ...group, members: updatedMembers };
+        }
+        return group;
+      })
+    );
   };
 
   const rejectMember = (groupId: string, memberEmail: string) => {
-    setGroups(prev => prev.map(g => {
-      if (g.id === groupId) {
-        return {
-          ...g,
-          members: g.members.map(m => 
-            m.email === memberEmail ? { ...m, status: 'rejected' as MemberStatus } : m
-          )
-        };
-      }
-      return g;
-    }));
+    setGroups(prev =>
+      prev.map(group => {
+        if (group.id === groupId) {
+          const updatedMembers = group.members.filter(m => m.email !== memberEmail);
+          return { ...group, members: updatedMembers };
+        }
+        return group;
+      })
+    );
   };
 
   const getPendingApprovals = (groupId: string): GroupMember[] => {
@@ -170,26 +218,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   return (
-    <AppContext.Provider value={{
-      user,
-      setUser,
-      groups,
-      addGroup,
-      updateGroup,
-      getGroupById,
-      refreshGroups,
-      updateMemberRole,
-      approveMember,
-      rejectMember,
-      getPendingApprovals,
-      loadUserData,
-    }}>
+    <AppContext.Provider
+      value={{
+        user,
+        setUser,
+        groups,
+        addGroup,
+        updateGroup,
+        getGroupById,
+        refreshGroups,
+        updateMemberRole,
+        approveMember,
+        rejectMember,
+        getPendingApprovals,
+        loadUserData,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );
 };
 
-export const useApp = () => {
+export const useApp = (): AppContextType => {
   const context = useContext(AppContext);
   if (!context) {
     throw new Error('useApp must be used within AppProvider');

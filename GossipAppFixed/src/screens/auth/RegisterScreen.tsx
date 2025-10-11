@@ -52,13 +52,19 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     setLoading(true);
     
     try {
-      const { firebaseAuth } = await import('../../services/FirebaseAuthService');
-      const user = await firebaseAuth.signUp(email.trim(), password, name.trim(), username.trim().toLowerCase());
+      const { supabaseAuth } = await import('../../services/SupabaseAuthService');
+      const result = await supabaseAuth.signUp(email.trim(), password, name.trim(), username.trim().toLowerCase());
+      
+      if (!result.success || !result.user) {
+        setLoading(false);
+        Alert.alert('Registration Error', result.error || 'Registration failed. Please try again.');
+        return;
+      }
       
       setLoading(false);
       Alert.alert(
         'Success', 
-        `Welcome to GossipIn, ${user.displayName}! You can now login.`,
+        `Welcome to GossipIn, ${result.user.displayName}! You can now login.`,
         [
           {
             text: 'OK',

@@ -31,20 +31,26 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     setLoading(true);
     
     try {
-      const { firebaseAuth } = await import('../../services/FirebaseAuthService');
-      const loggedInUser = await firebaseAuth.signIn(usernameOrEmail.trim(), password);
+      const { supabaseAuth } = await import('../../services/SupabaseAuthService');
+      const result = await supabaseAuth.signIn(usernameOrEmail.trim(), password);
+      
+      if (!result.success || !result.user) {
+        setLoading(false);
+        Alert.alert('Login Error', result.error || 'Login failed. Please try again.');
+        return;
+      }
       
       // Set user in context
-      setUser(loggedInUser);
+      setUser(result.user);
       
       setLoading(false);
-      Alert.alert('Success', `Welcome back, ${loggedInUser.displayName}!`, [
+      Alert.alert('Success', `Welcome back, ${result.user.displayName}!`, [
         {
           text: 'OK',
           onPress: () => {
             // Navigate to main app
             if (navigation) {
-              navigation.navigate('MainTabs', { user: loggedInUser });
+              navigation.navigate('MainTabs', { user: result.user });
             }
           },
         },
