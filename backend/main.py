@@ -194,6 +194,25 @@ async def health():
     return {"status": "ok"}
 
 
+@app.post("/debug/register")
+async def debug_register():
+    """Debug endpoint — tests register without FastAPI DI."""
+    try:
+        from backend.db import async_session
+        async with async_session() as session:
+            result = await auth_service.register_user(
+                session,
+                email="debug@test.com",
+                password="debug123",
+                display_name="Debug User",
+                username="debuguser",
+            )
+            return result
+    except Exception as exc:
+        import traceback
+        return {"error": str(exc), "traceback": traceback.format_exc()}
+
+
 @app.get("/health/db")
 async def health_db():
     """Check database connectivity."""
