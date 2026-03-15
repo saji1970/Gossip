@@ -71,11 +71,8 @@ class AudioService {
       await this.cancelRecording();
     }
 
-    const path = Platform.select({
-      android: `${Date.now()}.m4a`,
-      ios: `${Date.now()}.m4a`,
-      default: `${Date.now()}.m4a`,
-    });
+    // Pass undefined so the library uses its default cache directory path
+    const path = undefined;
 
     const audioSet = {
       AudioEncoderAndroid: AudioEncoderAndroidType.AAC,

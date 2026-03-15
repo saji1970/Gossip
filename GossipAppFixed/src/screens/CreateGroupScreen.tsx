@@ -22,7 +22,7 @@ interface CreateGroupScreenProps {
 }
 
 const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route }) => {
-  const { user, addGroup } = useApp();
+  const { user, groups, addGroup } = useApp();
   const { voiceState, isListening, startListening, stopListening, lastResult } = useVoice();
   const [groupName, setGroupName] = useState(route?.params?.groupName || '');
   const [groupDescription, setGroupDescription] = useState('');
@@ -49,8 +49,19 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route
   };
 
   const handleCreateGroup = () => {
-    if (!groupName.trim()) {
+    const trimmedName = groupName.trim();
+
+    if (!trimmedName) {
       Alert.alert('Error', 'Please enter a group name');
+      return;
+    }
+
+    // Check for duplicate group name locally
+    const duplicate = groups.some(
+      g => g.name.toLowerCase() === trimmedName.toLowerCase(),
+    );
+    if (duplicate) {
+      Alert.alert('Duplicate Name', `A group named "${trimmedName}" already exists. Please choose a different name.`);
       return;
     }
 
@@ -61,7 +72,7 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route
 
       const newGroup: Group = {
         id: Date.now().toString(),
-        name: groupName.trim(),
+        name: trimmedName,
         description: groupDescription.trim(),
         privacy: privacy,
         termsAndConditions: termsAndConditions.trim() || undefined,
@@ -84,7 +95,7 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route
       setLoading(false);
       Alert.alert(
         'Success',
-        `${privacy === 'private' ? 'Private' : 'Public'} group "${groupName}" created successfully!`,
+        `${privacy === 'private' ? 'Private' : 'Public'} group "${trimmedName}" created successfully!`,
         [
           {
             text: 'OK',

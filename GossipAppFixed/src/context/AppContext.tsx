@@ -15,6 +15,7 @@ interface AppContextType {
   groups: Group[];
   addGroup: (group: Group) => void;
   updateGroup: (groupId: string, updates: Partial<Group>) => void;
+  deleteGroup: (groupId: string) => Promise<void>;
   getGroupById: (groupId: string) => Group | undefined;
   refreshGroups: () => void;
   updateMemberRole: (groupId: string, memberEmail: string, role: MemberRole) => void;
@@ -111,6 +112,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
+  const deleteGroup = async (groupId: string) => {
+    setGroups(prev => prev.filter(g => g.id !== groupId));
+    try {
+      await api.deleteGroup(groupId);
+    } catch (error) {
+      console.error('Error deleting group on backend:', error);
+    }
+  };
+
   const getGroupById = (groupId: string): Group | undefined => {
     return groups.find(g => g.id === groupId);
   };
@@ -198,6 +208,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         groups,
         addGroup,
         updateGroup,
+        deleteGroup,
         getGroupById,
         refreshGroups,
         updateMemberRole,

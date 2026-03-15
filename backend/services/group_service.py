@@ -62,6 +62,21 @@ async def get_user_groups(session: AsyncSession, user_id: str) -> list[dict]:
     return [_group_to_dict(g) for g in groups]
 
 
+async def group_name_exists(
+    session: AsyncSession, user_id: str, name: str
+) -> bool:
+    """Check if a group with the given name already exists for this user."""
+    from sqlalchemy import func
+
+    result = await session.execute(
+        select(GroupModel).where(
+            GroupModel.created_by == user_id,
+            func.lower(GroupModel.name) == name.strip().lower(),
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def create_group(
     session: AsyncSession,
     user_id: str,
@@ -74,6 +89,9 @@ async def create_group(
     members: list[dict] | None = None,
 ) -> dict:
     """Create a new group and add the creator as admin member."""
+    if await group_name_exists(session, user_id, name):
+        raise ValueError(f"A group named '{name}' already exists")
+
     group = GroupModel(
         name=name,
         description=description,
@@ -298,3 +316,34 @@ async def is_group_member(session: AsyncSession, group_id: str, user_id: str) ->
         )
     )
     return result.scalar_one_or_none() is not None
+
+
+async def delete_group(session: AsyncSession, group_id: str, user_id: str) -> bool:
+    """Delete a group and all its members/messages. Only the creator can delete."""
+    result = await session.execute(
+        select(GroupModel).where(
+            GroupModel.id == group_id, GroupModel.created_by == user_id
+        )
+    )
+    group = result.scalar_one_or_none()
+    if not group:
+        return False
+
+    # Delete messages
+    msg_result = await session.execute(
+        select(MessageModel).where(MessageModel.group_id == group_id)
+    )
+    for msg in msg_result.scalars().all():
+        await session.delete(msg)
+
+    # Delete members
+    mem_result = await session.execute(
+        select(GroupMemberModel).where(GroupMemberModel.group_id == group_id)
+    )
+    for mem in mem_result.scalars().all():
+        await session.delete(mem)
+
+    # Delete group
+    await session.delete(group)
+    await session.commit()
+    return True

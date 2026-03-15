@@ -285,18 +285,33 @@ async def create_group(
     user: dict = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    group = await group_service.create_group(
-        session,
-        user_id=user["uid"],
-        user_email=user["email"],
-        name=req.name,
-        description=req.description,
-        privacy=req.privacy,
-        terms_and_conditions=req.termsAndConditions,
-        require_approval=req.requireApproval,
-        members=req.members,
-    )
+    try:
+        group = await group_service.create_group(
+            session,
+            user_id=user["uid"],
+            user_email=user["email"],
+            name=req.name,
+            description=req.description,
+            privacy=req.privacy,
+            terms_and_conditions=req.termsAndConditions,
+            require_approval=req.requireApproval,
+            members=req.members,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return {"group": group}
+
+
+@app.delete("/groups/{group_id}")
+async def delete_group(
+    group_id: str,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    deleted = await group_service.delete_group(session, group_id, user["uid"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Group not found or not authorized")
+    return {"success": True}
 
 
 @app.put("/groups/{group_id}")

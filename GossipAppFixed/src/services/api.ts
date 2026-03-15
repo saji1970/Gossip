@@ -162,6 +162,12 @@ export async function updateGroup(
   return res.group;
 }
 
+export async function deleteGroup(groupId: string): Promise<void> {
+  await request(`/groups/${groupId}`, {
+    method: 'DELETE',
+  }, true);
+}
+
 export async function updateMemberRole(
   groupId: string,
   memberEmail: string,
