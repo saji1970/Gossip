@@ -18,12 +18,13 @@ import { useVoice } from '../hooks/useVoice';
 
 interface CreateGroupScreenProps {
   navigation?: any;
+  route?: { params?: { groupName?: string } };
 }
 
-const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => {
+const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route }) => {
   const { user, addGroup } = useApp();
   const { voiceState, isListening, startListening, stopListening, lastResult } = useVoice();
-  const [groupName, setGroupName] = useState('');
+  const [groupName, setGroupName] = useState(route?.params?.groupName || '');
   const [groupDescription, setGroupDescription] = useState('');
   const [privacy, setPrivacy] = useState<'public' | 'private'>('public');
   const [termsAndConditions, setTermsAndConditions] = useState('');

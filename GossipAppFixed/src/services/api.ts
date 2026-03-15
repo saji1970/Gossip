@@ -204,6 +204,10 @@ export interface ChatMessage {
   content: string;
   isOwnMessage: boolean;
   timestamp: string;
+  messageType?: 'text' | 'voice';
+  audioFilePath?: string;
+  audioDurationMs?: number;
+  whisperTo?: string;
 }
 
 // ── Message endpoints ─────────────────────────────────────────────
@@ -232,6 +236,52 @@ export async function sendMessage(
     body: JSON.stringify({ groupId, senderName, content, isOwnMessage }),
   }, true);
   return res.message;
+}
+
+// ── Voice message endpoints ──────────────────────────────────────
+
+export async function sendVoiceMessage(
+  groupId: string,
+  audioUri: string,
+  durationMs: number,
+  senderName: string,
+  whisperTo?: string[],
+): Promise<ChatMessage> {
+  const token = await getToken();
+  const form = new FormData();
+
+  form.append('audio', {
+    uri: audioUri,
+    type: 'audio/mp4',
+    name: 'voice_message.m4a',
+  } as any);
+  form.append('groupId', groupId);
+  form.append('senderName', senderName);
+  form.append('durationMs', durationMs.toString());
+  if (whisperTo && whisperTo.length > 0) {
+    form.append('whisperTo', JSON.stringify(whisperTo));
+  }
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE_URL}/messages/voice`, {
+    method: 'POST',
+    body: form,
+    headers,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  const data = await res.json();
+  return data.message;
+}
+
+export function getAudioUrl(messageId: string): string {
+  return `${API_BASE_URL}/audio/${messageId}`;
 }
 
 // ── AI endpoints (unchanged) ──────────────────────────────────────

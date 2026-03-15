@@ -33,7 +33,7 @@ const FloatingMicButton: React.FC<FloatingMicButtonProps> = ({
         }
         break;
       case 'create_group':
-        onNavigate('CreateGroup');
+        onNavigate('CreateGroup', payload ? { groupName: payload } : undefined);
         break;
       case 'open_chat':
         // In a real implementation, look up group by name

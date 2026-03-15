@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     func,
@@ -105,6 +106,10 @@ class MessageModel(Base):
     sender_name: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_own_message: Mapped[bool] = mapped_column(Boolean, default=True)
+    message_type: Mapped[str] = mapped_column(String(20), default="text")  # text | voice
+    audio_file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    audio_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    whisper_to: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of recipient emails, null = public
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

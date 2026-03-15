@@ -1,17 +1,22 @@
+import json
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import engine, get_session
 from backend.models.database import Base
 from backend.services import auth_service, group_service
+
+AUDIO_UPLOAD_DIR = os.getenv("AUDIO_UPLOAD_DIR", "audio_uploads")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -361,7 +366,17 @@ async def list_messages(
     session: AsyncSession = Depends(get_session),
 ):
     messages = await group_service.get_group_messages(session, group_id, limit, offset)
-    return {"messages": messages}
+    # Filter out whisper messages not addressed to this user
+    filtered = []
+    for msg in messages:
+        whisper = msg.get("whisperTo")
+        if not whisper:
+            filtered.append(msg)
+            continue
+        whisper_list = json.loads(whisper) if isinstance(whisper, str) else whisper
+        if user["email"] in whisper_list or user["uid"] == msg["senderId"]:
+            filtered.append(msg)
+    return {"messages": filtered}
 
 
 @app.post("/messages")
@@ -379,6 +394,83 @@ async def send_message(
         is_own_message=req.isOwnMessage,
     )
     return {"message": msg}
+
+
+# ── Voice Message Endpoints ───────────────────────────────────────
+
+
+@app.post("/messages/voice")
+async def send_voice_message(
+    audio: UploadFile = File(...),
+    groupId: str = Form(...),
+    senderName: str = Form(...),
+    durationMs: int = Form(...),
+    whisperTo: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Upload a voice message. whisperTo is a JSON array of recipient emails."""
+    # Create directory for this group's audio files
+    group_dir = Path(AUDIO_UPLOAD_DIR) / groupId
+    group_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save the audio file
+    msg_id = str(uuid.uuid4())
+    file_ext = ".m4a"
+    audio_path = group_dir / f"{msg_id}{file_ext}"
+
+    audio_bytes = await audio.read()
+    audio_path.write_bytes(audio_bytes)
+
+    # Parse whisperTo
+    whisper_list = None
+    if whisperTo:
+        try:
+            whisper_list = json.loads(whisperTo)
+        except json.JSONDecodeError:
+            whisper_list = None
+
+    # Save message to database
+    msg = await group_service.save_voice_message(
+        session,
+        group_id=groupId,
+        sender_id=user["uid"],
+        sender_name=senderName,
+        audio_file_path=str(audio_path),
+        audio_duration_ms=durationMs,
+        whisper_to=json.dumps(whisper_list) if whisper_list else None,
+        message_id=msg_id,
+    )
+    return {"message": msg}
+
+
+@app.get("/audio/{message_id}")
+async def get_audio(
+    message_id: str,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve an audio file. Checks group membership and whisper permissions."""
+    msg = await group_service.get_message_by_id(session, message_id)
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # Verify user is in the group
+    is_member = await group_service.is_group_member(session, msg["groupId"], user["uid"])
+    if not is_member:
+        raise HTTPException(status_code=403, detail="Not a group member")
+
+    # Check whisper permissions
+    if msg.get("whisperTo"):
+        whisper_list = json.loads(msg["whisperTo"]) if isinstance(msg["whisperTo"], str) else msg["whisperTo"]
+        if user["email"] not in whisper_list and user["uid"] != msg["senderId"]:
+            raise HTTPException(status_code=403, detail="Not authorized to access this whisper")
+
+    audio_path = msg.get("audioFilePath")
+    if not audio_path or not Path(audio_path).exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(audio_path, media_type="audio/mp4")
 
 
 # ── AI Endpoints ──────────────────────────────────────────────────

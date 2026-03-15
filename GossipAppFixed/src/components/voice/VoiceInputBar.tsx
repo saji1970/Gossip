@@ -1,54 +1,42 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { Colors, BorderRadius, Spacing } from '../../constants/theme';
-import { useVoice } from '../../hooks/useVoice';
-import VoiceButton from './VoiceButton';
+import { useAudioRecorder } from '../../hooks/useAudioRecorder';
+import WhisperPicker, { WhisperMember } from './WhisperPicker';
 
 interface VoiceInputBarProps {
   onSendMessage: (text: string) => void;
-  onVoiceResult?: (text: string) => void;
-  onAudioCaptured?: (audioUri: string) => void;
+  onSendVoiceMessage?: (audioUri: string, durationMs: number, whisperTo?: string[]) => void;
   disabled?: boolean;
   groupName?: string;
+  groupMembers?: WhisperMember[];
+}
+
+function formatRecordingTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
   onSendMessage,
-  onVoiceResult,
-  onAudioCaptured,
+  onSendVoiceMessage,
   disabled = false,
-  groupName,
+  groupMembers = [],
 }) => {
-  const { voiceState, isListening, startListening, stopListening, lastResult } = useVoice();
+  const { isRecording, recordingDurationMs, startRecording, stopRecording, cancelRecording } = useAudioRecorder();
   const [isTextMode, setIsTextMode] = useState(false);
   const [textInput, setTextInput] = useState('');
-  const [lastProcessedTimestamp, setLastProcessedTimestamp] = useState(0);
-
-  // Auto-send when voice result arrives
-  useEffect(() => {
-    if (lastResult && lastResult.timestamp > lastProcessedTimestamp) {
-      setLastProcessedTimestamp(lastResult.timestamp);
-      onVoiceResult?.(lastResult.text);
-      onSendMessage(lastResult.text);
-      if (lastResult.audioUri && onAudioCaptured) {
-        onAudioCaptured(lastResult.audioUri);
-      }
-    }
-  }, [lastResult]);
-
-  const handleVoicePress = () => {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
-  };
+  const [showWhisperPicker, setShowWhisperPicker] = useState(false);
+  const [pendingWhisperTo, setPendingWhisperTo] = useState<string[] | undefined>(undefined);
 
   const handleTextSend = () => {
     if (!textInput.trim()) return;
@@ -56,12 +44,44 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
     setTextInput('');
   };
 
-  const statusText =
-    voiceState === 'listening' ? 'Listening...' :
-    voiceState === 'processing' ? 'Processing...' :
-    voiceState === 'error' ? 'Try again' :
-    'Tap to speak';
+  const handleStartRecording = async () => {
+    try {
+      await startRecording();
+    } catch (err: any) {
+      Alert.alert('Recording Error', err.message || 'Could not start recording');
+    }
+  };
 
+  const handleStopAndSend = async () => {
+    try {
+      const result = await stopRecording();
+      if (onSendVoiceMessage) {
+        onSendVoiceMessage(result.uri, result.durationMs, pendingWhisperTo);
+      }
+      setPendingWhisperTo(undefined);
+    } catch (err: any) {
+      Alert.alert('Recording Error', err.message || 'Could not stop recording');
+    }
+  };
+
+  const handleCancelRecording = async () => {
+    await cancelRecording();
+    setPendingWhisperTo(undefined);
+  };
+
+  const handleWhisperConfirm = async (selectedEmails: string[]) => {
+    setShowWhisperPicker(false);
+    setPendingWhisperTo(selectedEmails);
+    // Start recording immediately after selecting recipients
+    try {
+      await startRecording();
+    } catch (err: any) {
+      Alert.alert('Recording Error', err.message || 'Could not start recording');
+      setPendingWhisperTo(undefined);
+    }
+  };
+
+  // ── Text mode ──────────────────────────────────────────────
   if (isTextMode) {
     return (
       <View style={styles.container}>
@@ -70,7 +90,7 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
             style={styles.modeToggle}
             onPress={() => setIsTextMode(false)}
           >
-            <Text style={styles.modeToggleIcon}>🎤</Text>
+            <Text style={styles.modeToggleIcon}>&#x1F3A4;</Text>
           </TouchableOpacity>
           <TextInput
             style={styles.textInput}
@@ -87,13 +107,41 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
             onPress={handleTextSend}
             disabled={!textInput.trim() || disabled}
           >
-            <Text style={styles.sendIcon}>➤</Text>
+            <Text style={styles.sendIcon}>&#x27A4;</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
+  // ── Recording mode ─────────────────────────────────────────
+  if (isRecording) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.recordingRow}>
+          <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRecording}>
+            <Text style={styles.cancelIcon}>&#x2715;</Text>
+          </TouchableOpacity>
+
+          <View style={styles.recordingIndicator}>
+            <View style={styles.redDot} />
+            <Text style={styles.recordingTimer}>
+              {formatRecordingTime(recordingDurationMs)}
+            </Text>
+            {pendingWhisperTo && (
+              <Text style={styles.whisperBadge}>&#x1F512; Whisper</Text>
+            )}
+          </View>
+
+          <TouchableOpacity style={styles.sendRecordingButton} onPress={handleStopAndSend}>
+            <Text style={styles.sendRecordingIcon}>&#x27A4;</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Idle voice mode ────────────────────────────────────────
   return (
     <View style={styles.container}>
       <View style={styles.voiceRow}>
@@ -101,29 +149,38 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
           style={styles.keyboardToggle}
           onPress={() => setIsTextMode(true)}
         >
-          <Text style={styles.keyboardIcon}>⌨️</Text>
+          <Text style={styles.keyboardIcon}>&#x2328;&#xFE0F;</Text>
         </TouchableOpacity>
 
-        <View style={styles.voiceCenter}>
-          <VoiceButton
-            voiceState={voiceState}
-            onPress={handleVoicePress}
-            size="large"
-            disabled={disabled}
-          />
-          <Text style={[
-            styles.statusText,
-            voiceState === 'listening' && { color: Colors.voiceListening },
-            voiceState === 'processing' && { color: Colors.voiceProcessing },
-            voiceState === 'error' && { color: Colors.voiceError },
-          ]}>
-            {statusText}
-          </Text>
-        </View>
+        <TouchableOpacity
+          style={styles.micButton}
+          onPress={handleStartRecording}
+          disabled={disabled}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.micIcon}>&#x1F3A4;</Text>
+          <Text style={styles.micLabel}>Tap to record</Text>
+        </TouchableOpacity>
 
-        {/* Spacer to balance the keyboard toggle */}
-        <View style={styles.spacer} />
+        {groupMembers.length > 0 && (
+          <TouchableOpacity
+            style={styles.whisperToggle}
+            onPress={() => setShowWhisperPicker(true)}
+            disabled={disabled}
+          >
+            <Text style={styles.whisperIcon}>&#x1F512;</Text>
+          </TouchableOpacity>
+        )}
+
+        {groupMembers.length === 0 && <View style={styles.spacer} />}
       </View>
+
+      <WhisperPicker
+        visible={showWhisperPicker}
+        members={groupMembers}
+        onConfirm={handleWhisperConfirm}
+        onCancel={() => setShowWhisperPicker(false)}
+      />
     </View>
   );
 };
@@ -136,7 +193,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
   },
-  // Voice mode
+  // ── Voice idle ──
   voiceRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -154,20 +211,91 @@ const styles = StyleSheet.create({
   keyboardIcon: {
     fontSize: 20,
   },
-  voiceCenter: {
-    alignItems: 'center',
+  micButton: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
   },
-  statusText: {
-    fontSize: 16,
+  micIcon: {
+    fontSize: 32,
+  },
+  micLabel: {
+    fontSize: 14,
     color: Colors.textSecondary,
-    marginTop: Spacing.sm,
-    fontWeight: '500',
+    marginTop: 4,
+  },
+  whisperToggle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  whisperIcon: {
+    fontSize: 18,
   },
   spacer: {
     width: 44,
   },
-  // Text mode
+  // ── Recording ──
+  recordingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.sm,
+  },
+  cancelButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelIcon: {
+    fontSize: 18,
+    color: Colors.danger,
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  redDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.danger,
+    marginRight: Spacing.sm,
+  },
+  recordingTimer: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  whisperBadge: {
+    fontSize: 12,
+    color: Colors.warning,
+    fontWeight: '600',
+    marginLeft: Spacing.md,
+  },
+  sendRecordingButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendRecordingIcon: {
+    fontSize: 20,
+    color: Colors.white,
+  },
+  // ── Text mode ──
   textInputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',

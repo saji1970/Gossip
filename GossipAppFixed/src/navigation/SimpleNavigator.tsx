@@ -41,7 +41,7 @@ const SimpleNavigator: React.FC<NavigationProps> = ({ currentScreen, onNavigate,
       case 'ChatList':
         return <ChatListScreen navigation={navigation} onRefresh={params?.refresh} />;
       case 'CreateGroup':
-        return <CreateGroupScreen navigation={navigation} />;
+        return <CreateGroupScreen navigation={navigation} route={route} />;
       case 'InviteMembers':
         return <InviteMembersScreen navigation={navigation} route={route} />;
       case 'ChatRoom':

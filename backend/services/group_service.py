@@ -7,6 +7,22 @@ from sqlalchemy.orm import selectinload
 from backend.models.database import GroupMemberModel, GroupModel, MessageModel
 
 
+def _message_to_dict(m: MessageModel) -> dict:
+    return {
+        "id": m.id,
+        "groupId": m.group_id,
+        "senderId": m.sender_id,
+        "senderName": m.sender_name,
+        "content": m.content,
+        "isOwnMessage": m.is_own_message,
+        "messageType": m.message_type,
+        "audioFilePath": m.audio_file_path,
+        "audioDurationMs": m.audio_duration_ms,
+        "whisperTo": m.whisper_to,
+        "timestamp": m.created_at.isoformat() if m.created_at else "",
+    }
+
+
 def _member_to_dict(m: GroupMemberModel) -> dict:
     return {
         "email": m.email,
@@ -191,18 +207,7 @@ async def get_group_messages(
         .limit(limit)
     )
     messages = result.scalars().all()
-    return [
-        {
-            "id": m.id,
-            "groupId": m.group_id,
-            "senderId": m.sender_id,
-            "senderName": m.sender_name,
-            "content": m.content,
-            "isOwnMessage": m.is_own_message,
-            "timestamp": m.created_at.isoformat() if m.created_at else "",
-        }
-        for m in messages
-    ]
+    return [_message_to_dict(m) for m in messages]
 
 
 async def save_message(
@@ -232,13 +237,64 @@ async def save_message(
 
     await session.commit()
     await session.refresh(msg)
+    return _message_to_dict(msg)
 
-    return {
-        "id": msg.id,
-        "groupId": msg.group_id,
-        "senderId": msg.sender_id,
-        "senderName": msg.sender_name,
-        "content": msg.content,
-        "isOwnMessage": msg.is_own_message,
-        "timestamp": msg.created_at.isoformat() if msg.created_at else "",
-    }
+
+async def save_voice_message(
+    session: AsyncSession,
+    group_id: str,
+    sender_id: str,
+    sender_name: str,
+    audio_file_path: str,
+    audio_duration_ms: int,
+    whisper_to: str | None = None,
+    message_id: str | None = None,
+) -> dict:
+    msg = MessageModel(
+        group_id=group_id,
+        sender_id=sender_id,
+        sender_name=sender_name,
+        content="[Voice message]",
+        is_own_message=True,
+        message_type="voice",
+        audio_file_path=audio_file_path,
+        audio_duration_ms=audio_duration_ms,
+        whisper_to=whisper_to,
+    )
+    if message_id:
+        msg.id = message_id
+    session.add(msg)
+
+    # Update group's last message
+    result = await session.execute(
+        select(GroupModel).where(GroupModel.id == group_id)
+    )
+    group = result.scalar_one_or_none()
+    if group:
+        label = "[Whisper]" if whisper_to else "[Voice message]"
+        group.last_message = label
+
+    await session.commit()
+    await session.refresh(msg)
+    return _message_to_dict(msg)
+
+
+async def get_message_by_id(session: AsyncSession, message_id: str) -> dict | None:
+    result = await session.execute(
+        select(MessageModel).where(MessageModel.id == message_id)
+    )
+    msg = result.scalar_one_or_none()
+    if not msg:
+        return None
+    return _message_to_dict(msg)
+
+
+async def is_group_member(session: AsyncSession, group_id: str, user_id: str) -> bool:
+    result = await session.execute(
+        select(GroupMemberModel).where(
+            GroupMemberModel.group_id == group_id,
+            GroupMemberModel.user_id == user_id,
+            GroupMemberModel.status == "approved",
+        )
+    )
+    return result.scalar_one_or_none() is not None

@@ -33,6 +33,7 @@ const commandPatterns: CommandPattern[] = [
   {
     type: 'create_group',
     patterns: [
+      /^(?:create|new|make|start)\s+(?:a\s+)?group\s+(?:called?|named)\s+(.+)$/i,
       /^(?:create|new|make|start)\s+(?:a\s+)?group\s*(.*)$/i,
     ],
     extractPayload: (match) => match[1]?.trim() || '',

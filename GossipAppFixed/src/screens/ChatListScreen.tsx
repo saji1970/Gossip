@@ -24,28 +24,13 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
   });
 
   useEffect(() => {
-    loadUserInfo();
-  }, [user, onRefresh]);
-
-  const loadUserInfo = async () => {
-    try {
-      const { firebaseAuth } = await import('../services/FirebaseAuthService');
-      const currentUser = firebaseAuth.getCurrentUser();
-      if (currentUser) {
-        setUserProfile({
-          name: currentUser.displayName,
-          email: currentUser.email,
-        });
-      } else if (user) {
-        setUserProfile({
-          name: user.displayName,
-          email: user.email,
-        });
-      }
-    } catch (error) {
-      console.error('Error loading user info:', error);
+    if (user) {
+      setUserProfile({
+        name: user.displayName,
+        email: user.email,
+      });
     }
-  };
+  }, [user, onRefresh]);
 
   const handleCreateGroup = () => {
     if (navigation) {
