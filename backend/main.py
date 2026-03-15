@@ -11,12 +11,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import engine, get_session
-from backend.jobs.personality_update_job import start_scheduler, stop_scheduler
 from backend.models.database import Base
 from backend.services import auth_service, group_service
-from backend.services.conversation_pipeline import analyze_message, process_voice
-from backend.services.personality_engine import personality_engine
-from backend.services.topic_service import topic_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,9 +28,18 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ready")
-    start_scheduler()
+    # Start AI scheduler (non-critical — don't block startup)
+    try:
+        from backend.jobs.personality_update_job import start_scheduler, stop_scheduler
+        start_scheduler()
+    except Exception as exc:
+        logger.warning("Scheduler failed to start (non-critical): %s", exc)
+        stop_scheduler = lambda: None  # noqa: E731
     yield
-    stop_scheduler()
+    try:
+        stop_scheduler()
+    except Exception:
+        pass
     logger.info("Gossip AI backend stopped")
 
 
@@ -339,8 +344,10 @@ async def voice_process(
     sender_id: Optional[str] = Form(None),
     sender_name: Optional[str] = Form(None),
 ):
+    from backend.services.conversation_pipeline import process_voice as _process_voice
+
     audio_bytes = await audio.read()
-    result = await process_voice(
+    result = await _process_voice(
         audio_bytes=audio_bytes,
         group_id=group_id,
         sender_id=sender_id,
@@ -361,7 +368,9 @@ async def voice_process(
 
 @app.post("/message/analyze", response_model=AnalysisResponse)
 async def message_analyze(req: MessageAnalyzeRequest):
-    result = await analyze_message(
+    from backend.services.conversation_pipeline import analyze_message as _analyze_message
+
+    result = await _analyze_message(
         text=req.text,
         group_id=req.group_id,
         sender_id=req.sender_id,
@@ -382,7 +391,9 @@ async def message_analyze(req: MessageAnalyzeRequest):
 
 @app.get("/personality/{user_id}", response_model=PersonalityResponse)
 async def get_personality(user_id: str):
-    profile = personality_engine.get_profile(user_id)
+    from backend.services.personality_engine import personality_engine as _pe
+
+    profile = _pe.get_profile(user_id)
     if profile is None:
         return PersonalityResponse(
             id=user_id,
@@ -395,7 +406,7 @@ async def get_personality(user_id: str):
             badge_traits=[],
         )
 
-    badge_traits = personality_engine.get_badge_traits(user_id)
+    badge_traits = _pe.get_badge_traits(user_id)
 
     return PersonalityResponse(
         id=profile.id,
@@ -411,7 +422,9 @@ async def get_personality(user_id: str):
 
 @app.get("/topics/trending", response_model=list[TopicResponse])
 async def trending_topics(limit: int = 10):
-    topics = topic_service.get_trending_topics(limit=limit)
+    from backend.services.topic_service import topic_service as _ts
+
+    topics = _ts.get_trending_topics(limit=limit)
     return [
         TopicResponse(
             topic_id=t["topic_id"],

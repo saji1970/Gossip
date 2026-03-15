@@ -1,7 +1,9 @@
 import os
 
 # ── Database ──────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/gossip")
+_raw_db_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/gossip")
+# Railway provides postgresql:// but asyncpg needs postgresql+asyncpg://
+DATABASE_URL = _raw_db_url.replace("postgresql://", "postgresql+asyncpg://", 1) if _raw_db_url.startswith("postgresql://") else _raw_db_url
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "72"))
