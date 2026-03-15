@@ -10,6 +10,9 @@ import {
 } from 'react-native';
 import { Group, GroupMember } from '../utils/GroupStorage';
 import { useApp } from '../context/AppContext';
+import { Colors, BorderRadius, Spacing } from '../constants/theme';
+import { usePersonalityContext } from '../context/PersonalityContext';
+import SpeakerInsightCard from '../components/personality/SpeakerInsightCard';
 
 interface GroupSettingsScreenProps {
   navigation?: any;
@@ -18,6 +21,7 @@ interface GroupSettingsScreenProps {
 
 const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, route }) => {
   const { user, getGroupById, updateMemberRole, getPendingApprovals, approveMember, rejectMember, updateGroup } = useApp();
+  const { allProfiles } = usePersonalityContext();
   const groupId = route?.params?.group?.id;
   const [group, setGroup] = useState<Group | undefined>(route?.params?.group);
   const [pendingApprovals, setPendingApprovals] = useState<GroupMember[]>([]);
@@ -51,7 +55,6 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
             if (group) {
               updateMemberRole(group.id, member.email, 'approver');
               Alert.alert('Success', `${member.email} is now an approver`);
-              // Refresh group data
               const updatedGroup = getGroupById(group.id);
               if (updatedGroup) setGroup(updatedGroup);
             }
@@ -169,9 +172,9 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'admin': return '#EF4444';
-      case 'approver': return '#F59E0B';
-      default: return '#6B7280';
+      case 'admin': return Colors.danger;
+      case 'approver': return Colors.warning;
+      default: return Colors.textMuted;
     }
   };
 
@@ -250,7 +253,7 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
   if (!group) {
     return (
       <View style={styles.container}>
-        <Text>Group not found</Text>
+        <Text style={{ color: Colors.textPrimary }}>Group not found</Text>
       </View>
     );
   }
@@ -261,7 +264,7 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.navigate('ChatList')}>
+        <TouchableOpacity onPress={() => navigation.navigate('ChatList')} style={styles.backTouchable}>
           <Text style={styles.backButton}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Group Settings</Text>
@@ -317,9 +320,7 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
               Alert.alert(
                 'Invite Code',
                 `Share this code to invite members:\n\n${inviteCode}\n\nGroup: ${group.name}\nType: ${group.privacy === 'private' ? 'Private' : 'Public'}`,
-                [
-                  { text: 'OK' }
-                ]
+                [{ text: 'OK' }]
               );
             }}
           >
@@ -338,7 +339,7 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
               style={styles.addMemberButton}
               onPress={() => navigation.navigate('InviteMembers', { group })}
             >
-              <Text style={styles.addMemberButtonText}>➕ Add Members Directly</Text>
+              <Text style={styles.addMemberButtonText}>Add Members Directly</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -384,6 +385,18 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
           />
         </View>
 
+        {/* Member Insights */}
+        {allProfiles.filter(p => p.conversationCount > 0).length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Member Insights</Text>
+            {allProfiles
+              .filter(p => p.conversationCount > 0)
+              .map(profile => (
+                <SpeakerInsightCard key={profile.id} profile={profile} />
+              ))}
+          </View>
+        )}
+
         {/* Admin Actions */}
         {isAdmin && (
           <View style={styles.section}>
@@ -399,7 +412,6 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
                       text: 'Delete',
                       style: 'destructive',
                       onPress: () => {
-                        // Delete functionality
                         Alert.alert('Coming Soon', 'Group deletion will be implemented');
                       },
                     },
@@ -419,323 +431,332 @@ const GroupSettingsScreen: React.FC<GroupSettingsScreenProps> = ({ navigation, r
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.xl,
     paddingTop: 50,
-    paddingBottom: 20,
-    backgroundColor: '#6366F1',
+    paddingBottom: Spacing.xl,
+    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  backTouchable: {
+    paddingVertical: Spacing.sm,
   },
   backButton: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.textPrimary,
+    fontSize: 18,
     fontWeight: '600',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: Colors.textPrimary,
   },
   section: {
-    backgroundColor: '#FFFFFF',
-    marginTop: 12,
-    padding: 20,
+    backgroundColor: Colors.surface,
+    marginTop: Spacing.md,
+    padding: Spacing.xl,
   },
   groupAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#6366F1',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
     alignSelf: 'center',
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   groupAvatarText: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: Colors.white,
   },
   groupName: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: Colors.textPrimary,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
   groupDescription: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 18,
+    color: Colors.textSecondary,
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   groupMeta: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
+    gap: Spacing.sm,
   },
   privacyBadge: {
-    backgroundColor: '#DBEAFE',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    backgroundColor: Colors.surfaceLight,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
   },
   privateBadge: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: Colors.surfaceLight,
   },
   privacyBadgeText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#1E40AF',
+    color: Colors.textSecondary,
   },
   termsBadge: {
-    backgroundColor: '#E0E7FF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    backgroundColor: Colors.surfaceLight,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
   },
   termsBadgeText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#4338CA',
+    color: Colors.textSecondary,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 16,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.lg,
   },
   memberItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: Colors.border,
+    minHeight: 72,
   },
   memberAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#6366F1',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: Spacing.md,
   },
   memberAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.white,
+    fontSize: 20,
     fontWeight: 'bold',
   },
   memberInfo: {
     flex: 1,
   },
   memberEmail: {
-    fontSize: 16,
-    color: '#1F2937',
-    marginBottom: 4,
+    fontSize: 18,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.xs,
   },
   memberMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: Spacing.sm,
   },
   roleBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.sm,
   },
   roleBadgeText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: Colors.white,
   },
   memberStatus: {
-    fontSize: 12,
-    color: '#9CA3AF',
+    fontSize: 14,
+    color: Colors.textMuted,
   },
   manageButton: {
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    backgroundColor: Colors.surfaceLight,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
   },
   manageButtonText: {
-    color: '#6366F1',
-    fontSize: 14,
+    color: Colors.primary,
+    fontSize: 16,
     fontWeight: '600',
   },
   youBadge: {
-    backgroundColor: '#DBEAFE',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+    backgroundColor: Colors.surfaceLight,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
   },
   youBadgeText: {
-    color: '#1E40AF',
-    fontSize: 12,
+    color: Colors.info,
+    fontSize: 14,
     fontWeight: '600',
   },
   pendingItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginBottom: 8,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.surfaceLight,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    marginBottom: Spacing.sm,
+    minHeight: 72,
   },
   pendingText: {
-    fontSize: 12,
-    color: '#92400E',
+    fontSize: 14,
+    color: Colors.warning,
     fontStyle: 'italic',
   },
   approvalButtons: {
     flexDirection: 'row',
-    gap: 8,
+    gap: Spacing.sm,
   },
   approveButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#10B981',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.success,
     justifyContent: 'center',
     alignItems: 'center',
   },
   approveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    color: Colors.white,
+    fontSize: 20,
     fontWeight: 'bold',
   },
   rejectButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#EF4444',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.danger,
     justifyContent: 'center',
     alignItems: 'center',
   },
   rejectButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    color: Colors.white,
+    fontSize: 20,
     fontWeight: 'bold',
   },
   settingItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: Spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: Colors.border,
+    minHeight: 72,
   },
   settingInfo: {
     flex: 1,
   },
   settingTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 4,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.xs,
   },
   settingDescription: {
-    fontSize: 13,
-    color: '#6B7280',
+    fontSize: 14,
+    color: Colors.textSecondary,
   },
   toggle: {
-    width: 50,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#D1D5DB',
+    width: 56,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceLight,
     justifyContent: 'center',
     padding: 2,
   },
   toggleActive: {
-    backgroundColor: '#6366F1',
+    backgroundColor: Colors.primary,
   },
   toggleThumb: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.white,
   },
   toggleThumbActive: {
-    transform: [{ translateX: 22 }],
+    transform: [{ translateX: 24 }],
   },
   termsBox: {
-    backgroundColor: '#FEF3C7',
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 12,
+    backgroundColor: Colors.surfaceLight,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.md,
   },
   termsTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#92400E',
-    marginBottom: 8,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.sm,
   },
   termsText: {
-    fontSize: 13,
-    color: '#78350F',
-    lineHeight: 20,
+    fontSize: 14,
+    color: Colors.textSecondary,
+    lineHeight: 22,
   },
   dangerButton: {
-    backgroundColor: '#FEE2E2',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: 'transparent',
+    paddingVertical: 18,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
+    borderWidth: 2,
+    borderColor: Colors.danger,
   },
   dangerButtonText: {
-    color: '#DC2626',
-    fontSize: 16,
+    color: Colors.danger,
+    fontSize: 18,
     fontWeight: '600',
   },
   inviteCodeButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#C7D2FE',
-    marginBottom: 12,
+    backgroundColor: Colors.surfaceLight,
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: Spacing.md,
+    minHeight: 72,
   },
   inviteCodeIcon: {
     fontSize: 24,
-    marginRight: 12,
+    marginRight: Spacing.md,
   },
   inviteCodeInfo: {
     flex: 1,
   },
   inviteCodeTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#4338CA',
-    marginBottom: 4,
+    color: Colors.primary,
+    marginBottom: Spacing.xs,
   },
   inviteCodeDescription: {
-    fontSize: 14,
-    color: '#6366F1',
+    fontSize: 16,
+    color: Colors.textSecondary,
     fontFamily: 'monospace',
   },
   inviteCodeCopy: {
-    fontSize: 20,
+    fontSize: 22,
   },
   addMemberButton: {
-    backgroundColor: '#6366F1',
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    paddingVertical: 18,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
   },
   addMemberButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.white,
+    fontSize: 18,
     fontWeight: '600',
   },
 });

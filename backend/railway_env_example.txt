@@ -1,0 +1,24 @@
+# Railway Environment Variables
+# Set these in Railway dashboard → Service → Variables
+
+# Required: Qdrant Cloud connection
+QDRANT_HOST=your-cluster.cloud.qdrant.io
+QDRANT_PORT=6333
+
+# Optional: Ollama (deploy separately or use Ollama Cloud)
+OLLAMA_HOST=http://your-ollama-service.railway.internal:11434
+OLLAMA_MODEL=llama3.2:3b
+
+# Optional: Pyannote speaker diarization (needs HuggingFace token)
+PYANNOTE_AUTH_TOKEN=hf_xxxxx
+
+# Whisper transcription settings
+WHISPER_MODEL_SIZE=base
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+
+# Embedding model
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+# Port (Railway sets this automatically)
+# PORT=8000

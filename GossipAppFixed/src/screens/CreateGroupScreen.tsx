@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,9 @@ import {
 } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { Group } from '../utils/GroupStorage';
+import { Colors, BorderRadius, Spacing } from '../constants/theme';
+import VoiceButton from '../components/voice/VoiceButton';
+import { useVoice } from '../hooks/useVoice';
 
 interface CreateGroupScreenProps {
   navigation?: any;
@@ -19,12 +22,30 @@ interface CreateGroupScreenProps {
 
 const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => {
   const { user, addGroup } = useApp();
+  const { voiceState, isListening, startListening, stopListening, lastResult } = useVoice();
   const [groupName, setGroupName] = useState('');
   const [groupDescription, setGroupDescription] = useState('');
   const [privacy, setPrivacy] = useState<'public' | 'private'>('public');
   const [termsAndConditions, setTermsAndConditions] = useState('');
   const [requireApproval, setRequireApproval] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [lastProcessedTimestamp, setLastProcessedTimestamp] = useState(0);
+
+  // Populate group name from voice result
+  useEffect(() => {
+    if (lastResult && lastResult.timestamp > lastProcessedTimestamp) {
+      setLastProcessedTimestamp(lastResult.timestamp);
+      setGroupName(lastResult.text);
+    }
+  }, [lastResult]);
+
+  const handleVoicePress = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
 
   const handleCreateGroup = () => {
     if (!groupName.trim()) {
@@ -33,12 +54,10 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
     }
 
     setLoading(true);
-    
-    // Create and save the group
+
     setTimeout(() => {
       const userEmail = user?.email || 'user@example.com';
-      const userName = user?.displayName || 'User';
-      
+
       const newGroup: Group = {
         id: Date.now().toString(),
         name: groupName.trim(),
@@ -86,14 +105,14 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
+    <KeyboardAvoidingView
+      style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={handleCancel}>
+          <TouchableOpacity onPress={handleCancel} style={styles.backTouchable}>
             <Text style={styles.backButton}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Create Group</Text>
@@ -102,11 +121,14 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
 
         {/* Form */}
         <View style={styles.form}>
-          <View style={styles.avatarContainer}>
-            <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarIcon}>👥</Text>
-            </View>
-            <Text style={styles.avatarText}>Group Avatar</Text>
+          {/* Voice input for group name */}
+          <View style={styles.voiceSection}>
+            <Text style={styles.voiceHint}>Say the group name</Text>
+            <VoiceButton
+              voiceState={voiceState}
+              onPress={handleVoicePress}
+              size="medium"
+            />
           </View>
 
           <View style={styles.inputContainer}>
@@ -114,6 +136,7 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
             <TextInput
               style={styles.input}
               placeholder="Enter group name"
+              placeholderTextColor={Colors.textMuted}
               value={groupName}
               onChangeText={setGroupName}
               autoCapitalize="words"
@@ -126,6 +149,7 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="What's this group about?"
+              placeholderTextColor={Colors.textMuted}
               value={groupDescription}
               onChangeText={setGroupDescription}
               multiline
@@ -143,18 +167,18 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
                 style={[styles.privacyButton, privacy === 'public' && styles.privacyButtonActive]}
                 onPress={() => setPrivacy('public')}
               >
-                <Text style={[styles.privacyIcon, privacy === 'public' && styles.privacyIconActive]}>🌐</Text>
+                <Text style={styles.privacyIcon}>🌐</Text>
                 <Text style={[styles.privacyText, privacy === 'public' && styles.privacyTextActive]}>
                   Public
                 </Text>
                 <Text style={styles.privacyDescription}>Anyone can join</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={[styles.privacyButton, privacy === 'private' && styles.privacyButtonActive]}
                 onPress={() => setPrivacy('private')}
               >
-                <Text style={[styles.privacyIcon, privacy === 'private' && styles.privacyIconActive]}>🔒</Text>
+                <Text style={styles.privacyIcon}>🔒</Text>
                 <Text style={[styles.privacyText, privacy === 'private' && styles.privacyTextActive]}>
                   Private
                 </Text>
@@ -169,6 +193,7 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
             <TextInput
               style={[styles.input, styles.textArea]}
               placeholder="Add rules or terms for joining this group..."
+              placeholderTextColor={Colors.textMuted}
               value={termsAndConditions}
               onChangeText={setTermsAndConditions}
               multiline
@@ -197,13 +222,6 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
             </View>
           </TouchableOpacity>
 
-          <View style={styles.infoBox}>
-            <Text style={styles.infoIcon}>ℹ️</Text>
-            <Text style={styles.infoText}>
-              You'll be the admin and can add approvers after creating the group
-            </Text>
-          </View>
-
           <TouchableOpacity
             style={[styles.createButton, loading && styles.disabledButton]}
             onPress={handleCreateGroup}
@@ -226,7 +244,7 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.background,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -235,135 +253,130 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: Spacing.xl,
     paddingTop: 50,
-    paddingBottom: 20,
-    backgroundColor: '#6366F1',
+    paddingBottom: Spacing.xl,
+    backgroundColor: Colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  backTouchable: {
+    paddingVertical: Spacing.sm,
   },
   backButton: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.textPrimary,
+    fontSize: 18,
     fontWeight: '600',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: Colors.textPrimary,
   },
   form: {
-    padding: 20,
+    padding: Spacing.xl,
   },
-  avatarContainer: {
+  // Voice section
+  voiceSection: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: Spacing.xxl,
+    paddingVertical: Spacing.lg,
   },
-  avatarPlaceholder: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#E0E7FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  avatarIcon: {
-    fontSize: 40,
-  },
-  avatarText: {
-    fontSize: 14,
-    color: '#6B7280',
+  voiceHint: {
+    fontSize: 16,
+    color: Colors.textSecondary,
+    marginBottom: Spacing.md,
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: Spacing.xl,
   },
   label: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.sm,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    backgroundColor: '#F9FAFB',
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 16,
+    fontSize: 18,
+    color: Colors.textPrimary,
+    backgroundColor: Colors.surface,
   },
   textArea: {
     height: 100,
-    paddingTop: 14,
+    paddingTop: 16,
   },
   helperText: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 6,
+    fontSize: 14,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
     fontStyle: 'italic',
   },
   privacyContainer: {
     flexDirection: 'row',
-    gap: 12,
+    gap: Spacing.md,
   },
   privacyButton: {
     flex: 1,
     borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 16,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.xl,
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Colors.surface,
+    minHeight: 110,
   },
   privacyButtonActive: {
-    borderColor: '#6366F1',
-    backgroundColor: '#EEF2FF',
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surfaceLight,
   },
   privacyIcon: {
     fontSize: 32,
-    marginBottom: 8,
-  },
-  privacyIconActive: {
-    transform: [{ scale: 1.1 }],
+    marginBottom: Spacing.sm,
   },
   privacyText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
-    marginBottom: 4,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.xs,
   },
   privacyTextActive: {
-    color: '#6366F1',
+    color: Colors.primary,
   },
   privacyDescription: {
-    fontSize: 12,
-    color: '#9CA3AF',
+    fontSize: 14,
+    color: Colors.textMuted,
   },
   checkboxContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 20,
-    padding: 16,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
+    marginBottom: Spacing.xl,
+    padding: Spacing.lg,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: Colors.border,
   },
   checkbox: {
-    width: 24,
-    height: 24,
+    width: 28,
+    height: 28,
     borderWidth: 2,
-    borderColor: '#D1D5DB',
+    borderColor: Colors.border,
     borderRadius: 6,
-    marginRight: 12,
+    marginRight: Spacing.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxChecked: {
-    backgroundColor: '#6366F1',
-    borderColor: '#6366F1',
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   checkboxIcon: {
-    color: '#FFFFFF',
+    color: Colors.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -371,59 +384,42 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   checkboxLabel: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
-    marginBottom: 4,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.xs,
   },
   checkboxDescription: {
-    fontSize: 13,
-    color: '#6B7280',
-    lineHeight: 18,
-  },
-  infoBox: {
-    flexDirection: 'row',
-    backgroundColor: '#EEF2FF',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-  },
-  infoIcon: {
-    fontSize: 16,
-    marginRight: 8,
-  },
-  infoText: {
-    flex: 1,
     fontSize: 14,
-    color: '#4F46E5',
+    color: Colors.textSecondary,
     lineHeight: 20,
   },
   createButton: {
-    backgroundColor: '#6366F1',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    paddingVertical: 20,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: Spacing.md,
   },
   disabledButton: {
-    backgroundColor: '#9CA3AF',
+    backgroundColor: Colors.textMuted,
   },
   createButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.white,
+    fontSize: 18,
     fontWeight: '600',
   },
   cancelButton: {
     backgroundColor: 'transparent',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 20,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#E5E7EB',
+    borderColor: Colors.border,
   },
   cancelButtonText: {
-    color: '#6B7280',
-    fontSize: 16,
+    color: Colors.textSecondary,
+    fontSize: 18,
     fontWeight: '600',
   },
 });

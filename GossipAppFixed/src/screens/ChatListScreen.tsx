@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Group } from '../utils/GroupStorage';
 import { useApp } from '../context/AppContext';
+import { Colors, BorderRadius, Spacing } from '../constants/theme';
 
 interface ChatListScreenProps {
   navigation?: any;
@@ -23,7 +24,6 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
   });
 
   useEffect(() => {
-    // Load user info
     loadUserInfo();
   }, [user, onRefresh]);
 
@@ -53,53 +53,9 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
     }
   };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { firebaseAuth } = await import('../services/FirebaseAuthService');
-              await firebaseAuth.signOut();
-              if (navigation) {
-                navigation.navigate('Login');
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to logout. Please try again.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const handleChatPress = (group: Group) => {
     if (navigation) {
       navigation.navigate('ChatRoom', { group });
-    }
-  };
-
-  const renderEmptyState = () => (
-    <View style={styles.emptyContainer}>
-      <Text style={styles.emptyIcon}>💬</Text>
-      <Text style={styles.emptyTitle}>No Groups Yet</Text>
-      <Text style={styles.emptyText}>
-        Create or join a group to start chatting with your friends
-      </Text>
-      <TouchableOpacity style={styles.createButton} onPress={handleCreateGroup}>
-        <Text style={styles.createButtonText}>➕ Create Group</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const handleInviteMembers = (group: Group) => {
-    if (navigation) {
-      navigation.navigate('InviteMembers', { group });
     }
   };
 
@@ -109,14 +65,27 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
     }
   };
 
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Text style={styles.emptyIcon}>🎙️</Text>
+      <Text style={styles.emptyTitle}>No Groups Yet</Text>
+      <Text style={styles.emptyText}>
+        Say "create group" to get started
+      </Text>
+      <TouchableOpacity style={styles.createButton} onPress={handleCreateGroup}>
+        <Text style={styles.createButtonText}>Create Group</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderChatItem = ({ item }: { item: Group }) => {
     const approvedMembers = item.members.filter(m => m.status === 'approved');
     const pendingCount = item.members.filter(m => m.status === 'pending').length;
     const isAdmin = item.members.find(m => m.email === user?.email)?.role === 'admin';
 
     return (
-      <TouchableOpacity 
-        style={styles.chatItem} 
+      <TouchableOpacity
+        style={styles.chatItem}
         onPress={() => handleChatPress(item)}
         onLongPress={() => handleGroupSettings(item)}
       >
@@ -131,7 +100,7 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
         <View style={styles.chatInfo}>
           <View style={styles.chatHeader}>
             <View style={styles.chatNameContainer}>
-              <Text style={styles.chatName}>{item.name}</Text>
+              <Text style={styles.chatName} numberOfLines={1}>{item.name}</Text>
               {isAdmin && pendingCount > 0 && (
                 <View style={styles.pendingBadge}>
                   <Text style={styles.pendingBadgeText}>{pendingCount}</Text>
@@ -139,7 +108,7 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
               )}
             </View>
             {isAdmin && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => handleGroupSettings(item)}
                 style={styles.settingsButton}
               >
@@ -164,24 +133,7 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>🎉 GossipIn</Text>
-          <Text style={styles.headerSubtitle}>Your Chats</Text>
-        </View>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* User Info */}
-      <View style={styles.userInfo}>
-        <View style={styles.userAvatar}>
-          <Text style={styles.userAvatarText}>{userProfile.name[0].toUpperCase()}</Text>
-        </View>
-        <View>
-          <Text style={styles.userName}>{userProfile.name}</Text>
-          <Text style={styles.userEmail}>{userProfile.email}</Text>
-        </View>
+        <Text style={styles.headerTitle}>Gossip</Text>
       </View>
 
       {/* Chat List or Empty State */}
@@ -195,13 +147,6 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
           contentContainerStyle={styles.listContainer}
         />
       )}
-
-      {/* Floating Action Button */}
-      {groups.length > 0 && (
-        <TouchableOpacity style={styles.fab} onPress={handleCreateGroup}>
-          <Text style={styles.fabIcon}>➕</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 };
@@ -209,70 +154,22 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: Colors.background,
   },
   header: {
-    backgroundColor: '#6366F1',
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: Colors.background,
+    paddingTop: 54,
+    paddingBottom: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: Colors.textPrimary,
   },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#E0E7FF',
-    marginTop: 4,
-  },
-  logoutButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  logoutButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  userAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#6366F1',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  userAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  userEmail: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 2,
-  },
+  // Empty state
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -281,65 +178,68 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     fontSize: 64,
-    marginBottom: 20,
+    marginBottom: Spacing.xl,
   },
   emptyTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1F2937',
-    marginBottom: 10,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.md,
   },
   emptyText: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 18,
+    color: Colors.textSecondary,
     textAlign: 'center',
-    marginBottom: 30,
-    lineHeight: 24,
+    marginBottom: Spacing.xxxl,
+    lineHeight: 26,
   },
   createButton: {
-    backgroundColor: '#6366F1',
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.xxxl,
+    borderRadius: BorderRadius.md,
   },
   createButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.white,
+    fontSize: 18,
     fontWeight: '600',
   },
+  // List
   listContainer: {
-    paddingVertical: 8,
+    paddingVertical: Spacing.sm,
   },
   chatItem: {
     flexDirection: 'row',
-    padding: 16,
-    backgroundColor: '#FFFFFF',
+    padding: Spacing.xl,
+    backgroundColor: Colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: Colors.border,
+    alignItems: 'center',
+    minHeight: 88,
   },
   chatAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#6366F1',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: Spacing.lg,
     position: 'relative',
   },
   chatAvatarText: {
-    color: '#FFFFFF',
-    fontSize: 18,
+    color: Colors.white,
+    fontSize: 24,
     fontWeight: 'bold',
   },
   privacyIndicator: {
     position: 'absolute',
     bottom: -2,
     right: -2,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    width: 24,
+    height: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -353,24 +253,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   pendingBadge: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: Colors.warning,
     borderRadius: 10,
-    minWidth: 20,
-    height: 20,
+    minWidth: 22,
+    height: 22,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 6,
   },
   pendingBadgeText: {
-    color: '#92400E',
-    fontSize: 11,
+    color: Colors.white,
+    fontSize: 12,
     fontWeight: 'bold',
   },
   settingsButton: {
-    padding: 4,
+    padding: Spacing.sm,
   },
   settingsButtonText: {
-    fontSize: 20,
+    fontSize: 22,
   },
   chatInfo: {
     flex: 1,
@@ -378,27 +278,12 @@ const styles = StyleSheet.create({
   chatHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    marginBottom: Spacing.xs,
   },
   chatName: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '600',
-    color: '#1F2937',
-  },
-  chatTime: {
-    fontSize: 12,
-    color: '#9CA3AF',
-  },
-  inviteButton: {
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  inviteButtonText: {
-    color: '#6366F1',
-    fontSize: 12,
-    fontWeight: '600',
+    color: Colors.textPrimary,
   },
   chatFooter: {
     flexDirection: 'row',
@@ -406,49 +291,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   chatMessage: {
-    fontSize: 14,
-    color: '#6B7280',
+    fontSize: 16,
+    color: Colors.textSecondary,
     flex: 1,
   },
   memberCount: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginLeft: 8,
-  },
-  unreadBadge: {
-    backgroundColor: '#6366F1',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    marginLeft: 8,
-  },
-  unreadText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#6366F1',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-  },
-  fabIcon: {
-    fontSize: 24,
-    color: '#FFFFFF',
+    fontSize: 14,
+    color: Colors.textMuted,
+    marginLeft: Spacing.sm,
   },
 });
 

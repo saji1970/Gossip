@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  TextInput,
   TouchableOpacity,
   Alert,
   KeyboardAvoidingView,
@@ -13,6 +12,13 @@ import {
 } from 'react-native';
 import { Group } from '../utils/GroupStorage';
 import { useApp } from '../context/AppContext';
+import { Colors, BorderRadius, Spacing } from '../constants/theme';
+import VoiceInputBar from '../components/voice/VoiceInputBar';
+import { usePersonality } from '../hooks/usePersonality';
+import ReplySuggestions from '../components/personality/ReplySuggestions';
+import PersonalityBadge from '../components/personality/PersonalityBadge';
+import * as api from '../services/api';
+import { ReplySuggestion } from '../modules/personality/types';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -33,24 +39,50 @@ interface Message {
 // Simple message storage - persists across the app
 const messagesByGroup = new Map<string, Message[]>();
 
+const MOCK_SENDERS = [
+  { id: 'mock-sarah', name: 'Sarah' },
+  { id: 'mock-jake', name: 'Jake' },
+  { id: 'mock-alex', name: 'Alex' },
+];
+
+const MOCK_MESSAGES = [
+  "Yeah right, Mark is *totally* loyal",
+  "OMG did you hear about the party this weekend?!",
+  "I can't believe she said that behind everyone's back",
+  "Why would he even do that? Makes no sense",
+  "Apparently they broke up last night",
+  "LOL that's hilarious, I'm dead",
+  "I heard a rumor about the boss... spill the tea",
+  "That's awful, are you okay?",
+  "NO WAY!! Are you serious right now?!",
+  "Whatever, obviously nobody cares",
+];
+
 const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) => {
   const { user, getGroupById } = useApp();
+  const { analyzeMessage, suggestions, clearSuggestions } = usePersonality();
   const groupId = route?.params?.group?.id;
   const [group, setGroup] = useState<Group | undefined>(route?.params?.group);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [backendOnline, setBackendOnline] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<ReplySuggestion[]>([]);
   const flatListRef = useRef<FlatList>(null);
+  const mockIndexRef = useRef(0);
+  const aiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (groupId) {
-      // Get latest group data from context
       const currentGroup = getGroupById(groupId);
       if (currentGroup) {
         setGroup(currentGroup);
       }
       loadMessages();
     }
+    api.healthCheck().then(setBackendOnline).catch(() => setBackendOnline(false));
+    return () => {
+      if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
+    };
   }, [groupId]);
 
   const loadMessages = () => {
@@ -60,114 +92,35 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }
   };
 
-  const handleSendMessage = () => {
-    if (!newMessage.trim() || !groupId || sending) return;
+  const handleSendMessage = (text: string) => {
+    if (!text.trim() || !groupId || sending) return;
 
     setSending(true);
-    
+
     setTimeout(() => {
       const userEmail = user?.email || 'user@example.com';
       const userName = user?.displayName || 'You';
-      
+
       const message: Message = {
         id: Date.now().toString(),
         senderId: userEmail,
         senderName: userName,
-        content: newMessage.trim(),
+        content: text.trim(),
         timestamp: new Date(),
         isOwnMessage: true,
       };
 
-      // Save message
       const groupMessages = messagesByGroup.get(groupId) || [];
       groupMessages.push(message);
       messagesByGroup.set(groupId, groupMessages);
 
       setMessages([...groupMessages]);
-      setNewMessage('');
       setSending(false);
-      
-      // Scroll to bottom
+
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }, 300);
-  };
-
-  const handleAttachment = (type: 'photo' | 'video' | 'document') => {
-    if (!groupId || sending) return;
-
-    setSending(true);
-    
-    setTimeout(() => {
-      const userEmail = user?.email || 'user@example.com';
-      const userName = user?.displayName || 'You';
-      
-      const attachmentMessage: Message = {
-        id: Date.now().toString(),
-        senderId: userEmail,
-        senderName: userName,
-        content: type === 'photo' ? '📷 Photo' : type === 'video' ? '📹 Video' : '📄 Document',
-        timestamp: new Date(),
-        isOwnMessage: true,
-      };
-
-      const groupMessages = messagesByGroup.get(groupId) || [];
-      groupMessages.push(attachmentMessage);
-      messagesByGroup.set(groupId, groupMessages);
-
-      setMessages([...groupMessages]);
-      setSending(false);
-      
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-      
-      Alert.alert('Sent', `${type.charAt(0).toUpperCase() + type.slice(1)} sent successfully!`);
-    }, 500);
-  };
-
-  const handleVoiceMessage = () => {
-    if (!groupId || sending) return;
-
-    Alert.alert(
-      'Voice Message',
-      'Hold to record voice message',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send Sample',
-          onPress: () => {
-            setSending(true);
-            
-            setTimeout(() => {
-              const userEmail = user?.email || 'user@example.com';
-              const userName = user?.displayName || 'You';
-              
-              const voiceMessage: Message = {
-                id: Date.now().toString(),
-                senderId: userEmail,
-                senderName: userName,
-                content: '🎤 Voice message (0:15)',
-                timestamp: new Date(),
-                isOwnMessage: true,
-              };
-
-              const groupMessages = messagesByGroup.get(groupId) || [];
-              groupMessages.push(voiceMessage);
-              messagesByGroup.set(groupId, groupMessages);
-
-              setMessages([...groupMessages]);
-              setSending(false);
-              
-              setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-              }, 100);
-            }, 500);
-          }
-        }
-      ]
-    );
   };
 
   const handleStartCall = (type: 'voice' | 'video') => {
@@ -180,10 +133,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
           text: 'Start Call',
           onPress: () => {
             if (navigation) {
-              navigation.navigate('GroupCall', { 
-                group, 
-                callType: type 
-              });
+              navigation.navigate('GroupCall', { group, callType: type });
             }
           },
         },
@@ -191,41 +141,80 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     );
   };
 
-  const handleChatWithMember = (memberEmail: string) => {
-    Alert.alert(
-      'Direct Message',
-      `Start a private chat with ${memberEmail}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Start Chat',
-          onPress: () => {
-            Alert.alert('Coming Soon', 'Direct messaging will be available soon!');
-          },
-        },
-      ]
-    );
+  const simulateIncomingMessage = () => {
+    if (!groupId) return;
+    const sender = MOCK_SENDERS[mockIndexRef.current % MOCK_SENDERS.length];
+    const text = MOCK_MESSAGES[mockIndexRef.current % MOCK_MESSAGES.length];
+    mockIndexRef.current++;
+
+    const message: Message = {
+      id: `mock-${Date.now()}`,
+      senderId: sender.id,
+      senderName: sender.name,
+      content: text,
+      timestamp: new Date(),
+      isOwnMessage: false,
+    };
+
+    const groupMessages = messagesByGroup.get(groupId) || [];
+    groupMessages.push(message);
+    messagesByGroup.set(groupId, groupMessages);
+    setMessages([...groupMessages]);
+
+    // Feed to local personality engine (always runs)
+    analyzeMessage(sender.id, sender.name, text);
+
+    // If backend is online, also send for AI analysis
+    if (backendOnline) {
+      api.analyzeMessage(text, groupId, sender.id, sender.name)
+        .then((result) => {
+          if (result.reply_suggestions?.length > 0) {
+            const mapped: ReplySuggestion[] = result.reply_suggestions.map((s) => ({
+              text: s,
+              tone: result.emotion,
+            }));
+            setAiSuggestions(mapped);
+            if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
+            aiTimerRef.current = setTimeout(() => setAiSuggestions([]), 10000);
+          }
+        })
+        .catch(() => {});
+    }
+
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   };
+
+  const handleSuggestionSelect = (text: string) => {
+    clearSuggestions();
+    setAiSuggestions([]);
+    if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
+    handleSendMessage(text);
+  };
+
+  // Merge local + AI suggestions, prefer AI when available
+  const activeSuggestions = aiSuggestions.length > 0 ? aiSuggestions : suggestions;
 
   const formatMessageTime = (timestamp: Date) => {
     const now = new Date();
     const diff = now.getTime() - timestamp.getTime();
-    
+
     if (diff < 60000) return 'Just now';
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    
+
     return timestamp.toLocaleDateString();
   };
 
   const renderMessage = ({ item: message }: { item: Message }) => {
-    const avatarColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8'];
+    const avatarColors = ['#818CF8', '#34D399', '#FB923C', '#F87171', '#60A5FA', '#A78BFA', '#F472B6'];
     const avatarColor = avatarColors[message.senderName.length % avatarColors.length];
 
     return (
       <View style={[
         styles.messageContainer,
-        message.isOwnMessage ? styles.ownMessage : styles.otherMessage
+        message.isOwnMessage ? styles.ownMessage : styles.otherMessage,
       ]}>
         {!message.isOwnMessage && (
           <View style={styles.senderInfo}>
@@ -235,9 +224,10 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
             <Text style={[styles.senderName, { color: avatarColor }]}>
               ~ {message.senderName}
             </Text>
+            <PersonalityBadge speakerId={message.senderId} />
           </View>
         )}
-        
+
         <View style={[
           styles.messageBubble,
           message.isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
@@ -248,10 +238,10 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
           ]}>
             {message.content}
           </Text>
-          
+
           <Text style={[
             styles.messageTime,
-            message.isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime
+            message.isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime,
           ]}>
             {formatMessageTime(message.timestamp)}
           </Text>
@@ -262,10 +252,10 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
-      <Text style={styles.emptyIcon}>💬</Text>
-      <Text style={styles.emptyTitle}>Start the conversation</Text>
+      <Text style={styles.emptyIcon}>🎙️</Text>
+      <Text style={styles.emptyTitle}>Start talking</Text>
       <Text style={styles.emptyDescription}>
-        Send your first message to begin chatting in this group
+        Tap the mic and say your first message
       </Text>
     </View>
   );
@@ -273,7 +263,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
   if (!group) {
     return (
       <View style={styles.container}>
-        <Text>No group selected</Text>
+        <Text style={{ color: Colors.textPrimary }}>No group selected</Text>
       </View>
     );
   }
@@ -284,62 +274,36 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        {/* Group Info Header */}
+        {/* Header */}
         <View style={styles.groupHeader}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.navigate('ChatList')}
           >
-            <Text style={styles.backButtonText}>← Back</Text>
+            <Text style={styles.backButtonText}>←</Text>
           </TouchableOpacity>
-          
-          <View style={styles.groupAvatarContainer}>
-            <View style={styles.groupAvatarCircle}>
-              <Text style={styles.groupAvatarText}>{group.name.charAt(0).toUpperCase()}</Text>
-            </View>
-          </View>
-          
+
           <View style={styles.groupInfo}>
-            <Text style={styles.groupName}>{group.name}</Text>
+            <Text style={styles.groupName} numberOfLines={1}>{group.name}</Text>
             <Text style={styles.groupMembers}>{group.members?.length || 1} members</Text>
           </View>
-          
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={styles.callButton}
-              onPress={() => handleStartCall('voice')}
-            >
-              <Text style={styles.callIcon}>📞</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.callButton}
-              onPress={() => handleStartCall('video')}
-            >
-              <Text style={styles.callIcon}>📹</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.callButton}
-              onPress={() => {
-                if (group) {
-                  const approvedMembers = group.members.filter(m => m.status === 'approved');
-                  const memberList = approvedMembers.map(m => m.email).join('\n');
-                  Alert.alert(
-                    'Group Members',
-                    `${approvedMembers.length} members:\n\n${memberList}`,
-                    approvedMembers.slice(0, 5).map(m => ({
-                      text: `Chat with ${m.email}`,
-                      onPress: () => handleChatWithMember(m.email)
-                    })).concat([{ text: 'Close', style: 'cancel' }])
-                  );
-                }
-              }}
-            >
-              <Text style={styles.callIcon}>👥</Text>
-            </TouchableOpacity>
-          </View>
+
+          <TouchableOpacity
+            style={styles.simButton}
+            onPress={simulateIncomingMessage}
+          >
+            <Text style={styles.simIcon}>💬</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.callButton}
+            onPress={() => handleStartCall('voice')}
+          >
+            <Text style={styles.callIcon}>📞</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Messages List */}
+        {/* Messages */}
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -351,63 +315,19 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
           showsVerticalScrollIndicator={false}
         />
 
-        {/* Message Input */}
-        <View style={styles.inputContainer}>
-          <View style={styles.inputWrapper}>
-            <TouchableOpacity
-              style={styles.emojiButton}
-              onPress={() => Alert.alert('Emoji Picker', 'Select emoji to add to message')}
-            >
-              <Text style={styles.emoji}>😊</Text>
-            </TouchableOpacity>
-            
-            <TextInput
-              style={styles.messageInput}
-              placeholder="Type a message..."
-              placeholderTextColor="#9CA3AF"
-              value={newMessage}
-              onChangeText={setNewMessage}
-              multiline
-              maxLength={1000}
-            />
-            
-            <TouchableOpacity
-              style={styles.mediaButton}
-              onPress={() => {
-                Alert.alert(
-                  'Attach File',
-                  'Choose attachment type',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: '📷 Photo', onPress: () => handleAttachment('photo') },
-                    { text: '📹 Video', onPress: () => handleAttachment('video') },
-                    { text: '📄 Document', onPress: () => handleAttachment('document') },
-                  ]
-                );
-              }}
-              disabled={sending}
-            >
-              <Text style={styles.mediaIcon}>📎</Text>
-            </TouchableOpacity>
-            
-            {newMessage.trim() ? (
-              <TouchableOpacity
-                style={[styles.sendButton, sending && styles.sendButtonDisabled]}
-                onPress={handleSendMessage}
-                disabled={sending}
-              >
-                <Text style={styles.sendIcon}>➤</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.micButton}
-                onPress={() => handleVoiceMessage()}
-              >
-                <Text style={styles.micIcon}>🎤</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
+        {/* Reply Suggestions */}
+        <ReplySuggestions
+          suggestions={activeSuggestions}
+          onSelect={handleSuggestionSelect}
+          visible={activeSuggestions.length > 0}
+        />
+
+        {/* Voice Input Bar */}
+        <VoiceInputBar
+          onSendMessage={handleSendMessage}
+          disabled={sending}
+          groupName={group.name}
+        />
       </KeyboardAvoidingView>
     </View>
   );
@@ -416,77 +336,82 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#075E54',
+    backgroundColor: Colors.background,
   },
   keyboardView: {
     flex: 1,
   },
+  // Header
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#075E54',
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
+    backgroundColor: Colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: '#128C7E',
+    borderBottomColor: Colors.border,
     paddingTop: 50,
   },
   backButton: {
-    marginRight: 8,
-  },
-  backButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  groupAvatarContainer: {
-    marginRight: 12,
-  },
-  groupAvatarCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#128C7E',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: Spacing.sm,
   },
-  groupAvatarText: {
-    fontSize: 18,
+  backButtonText: {
+    color: Colors.textPrimary,
+    fontSize: 24,
     fontWeight: '600',
-    color: '#FFFFFF',
   },
   groupInfo: {
     flex: 1,
   },
   groupName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '700',
+    color: Colors.textPrimary,
     marginBottom: 2,
   },
   groupMembers: {
-    fontSize: 13,
-    color: '#B8C5C2',
+    fontSize: 14,
+    color: Colors.textMuted,
   },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 8,
+  simButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.sm,
+  },
+  simIcon: {
+    fontSize: 18,
   },
   callButton: {
-    padding: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   callIcon: {
-    fontSize: 20,
+    fontSize: 22,
   },
+  // Messages
   messagesList: {
     flex: 1,
-    backgroundColor: '#ECE5DD',
+    backgroundColor: Colors.background,
   },
   messagesContent: {
-    padding: 16,
+    padding: Spacing.lg,
     flexGrow: 1,
   },
   messageContainer: {
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
     maxWidth: '85%',
   },
   ownMessage: {
@@ -501,56 +426,57 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   senderAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: Spacing.sm,
   },
   avatarText: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: Colors.white,
   },
   senderName: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
   messageBubble: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 18,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.xxl,
   },
   ownMessageBubble: {
-    backgroundColor: '#DCF8C6',
-    borderBottomRightRadius: 4,
+    backgroundColor: Colors.ownBubble,
+    borderBottomRightRadius: 6,
   },
   otherMessageBubble: {
-    backgroundColor: '#FFFFFF',
-    borderBottomLeftRadius: 4,
+    backgroundColor: Colors.otherBubble,
+    borderBottomLeftRadius: 6,
   },
   messageText: {
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 20,
+    lineHeight: 28,
   },
   ownMessageText: {
-    color: '#303030',
+    color: Colors.ownBubbleText,
   },
   otherMessageText: {
-    color: '#303030',
+    color: Colors.otherBubbleText,
   },
   messageTime: {
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 4,
     alignSelf: 'flex-end',
   },
   ownMessageTime: {
-    color: '#667781',
+    color: Colors.textMuted,
   },
   otherMessageTime: {
-    color: '#667781',
+    color: Colors.textMuted,
   },
+  // Empty state
   emptyState: {
     flex: 1,
     alignItems: 'center',
@@ -559,85 +485,20 @@ const styles = StyleSheet.create({
   },
   emptyIcon: {
     fontSize: 64,
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
   },
   emptyTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 8,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.sm,
   },
   emptyDescription: {
     fontSize: 16,
-    color: '#6B7280',
+    color: Colors.textSecondary,
     textAlign: 'center',
     paddingHorizontal: 40,
     lineHeight: 24,
-  },
-  inputContainer: {
-    padding: 12,
-    backgroundColor: '#F0F0F0',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    minHeight: 48,
-  },
-  messageInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1F2937',
-    maxHeight: 100,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  emojiButton: {
-    padding: 4,
-    marginRight: 4,
-  },
-  emoji: {
-    fontSize: 24,
-  },
-  mediaButton: {
-    padding: 4,
-    marginLeft: 4,
-  },
-  mediaIcon: {
-    fontSize: 24,
-  },
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#075E54',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#9CA3AF',
-  },
-  sendIcon: {
-    fontSize: 20,
-    color: '#FFFFFF',
-  },
-  micButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
-  },
-  micIcon: {
-    fontSize: 24,
   },
 });
 

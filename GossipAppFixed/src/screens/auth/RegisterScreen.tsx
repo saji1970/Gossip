@@ -10,6 +10,7 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { Colors, BorderRadius, Spacing } from '../../constants/theme';
 
 interface RegisterScreenProps {
   navigation?: any;
@@ -50,26 +51,25 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     }
 
     setLoading(true);
-    
+
     try {
       const { supabaseAuth } = await import('../../services/SupabaseAuthService');
       const result = await supabaseAuth.signUp(email.trim(), password, name.trim(), username.trim().toLowerCase());
-      
+
       if (!result.success || !result.user) {
         setLoading(false);
         Alert.alert('Registration Error', result.error || 'Registration failed. Please try again.');
         return;
       }
-      
+
       setLoading(false);
       Alert.alert(
-        'Success', 
-        `Welcome to GossipIn, ${result.user.displayName}! You can now login.`,
+        'Success',
+        `Welcome to Gossip, ${result.user.displayName}! You can now login.`,
         [
           {
             text: 'OK',
             onPress: () => {
-              // Navigate back to login
               if (navigation) {
                 navigation.navigate('Login');
               }
@@ -91,13 +91,13 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
+    <KeyboardAvoidingView
+      style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <View style={styles.header}>
-          <Text style={styles.title}>🎉 GossipIn</Text>
+          <Text style={styles.title}>Gossip</Text>
           <Text style={styles.subtitle}>Create Account</Text>
         </View>
 
@@ -107,7 +107,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
             <TextInput
               style={styles.input}
               placeholder="Enter your full name"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={Colors.textMuted}
               value={name}
               onChangeText={setName}
               autoCapitalize="words"
@@ -119,7 +119,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
             <TextInput
               style={styles.input}
               placeholder="Choose a username (e.g., johndoe)"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={Colors.textMuted}
               value={username}
               onChangeText={setUsername}
               autoCapitalize="none"
@@ -133,7 +133,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
             <TextInput
               style={styles.input}
               placeholder="Enter your email"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={Colors.textMuted}
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -147,7 +147,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
             <TextInput
               style={styles.input}
               placeholder="Create a password (min 6 characters)"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={Colors.textMuted}
               value={password}
               onChangeText={setPassword}
               secureTextEntry
@@ -160,7 +160,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
             <TextInput
               style={styles.input}
               placeholder="Confirm your password"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={Colors.textMuted}
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               secureTextEntry
@@ -196,102 +196,99 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.background,
   },
   scrollContainer: {
     flexGrow: 1,
   },
   header: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#6366F1',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 40,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: 70,
+    paddingBottom: 36,
   },
   title: {
-    fontSize: 36,
+    fontSize: 42,
     fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 8,
+    color: Colors.primary,
+    marginBottom: Spacing.sm,
   },
   subtitle: {
-    fontSize: 18,
-    color: '#E0E7FF',
+    fontSize: 20,
+    color: Colors.textSecondary,
     fontWeight: '500',
   },
   form: {
-    flex: 2,
-    padding: 30,
-    justifyContent: 'center',
+    flex: 1,
+    padding: Spacing.xxxl,
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: Spacing.xl,
   },
   label: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
+    color: Colors.textPrimary,
+    marginBottom: Spacing.sm,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#1F2937',
-    backgroundColor: '#FFFFFF',
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 18,
+    fontSize: 18,
+    color: Colors.textPrimary,
+    backgroundColor: Colors.surface,
   },
   helperText: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 4,
+    fontSize: 14,
+    color: Colors.textMuted,
+    marginTop: Spacing.xs,
     fontStyle: 'italic',
   },
   registerButton: {
-    backgroundColor: '#6366F1',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    paddingVertical: 20,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: Spacing.md,
   },
   disabledButton: {
-    backgroundColor: '#9CA3AF',
+    backgroundColor: Colors.textMuted,
   },
   registerButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: Colors.white,
+    fontSize: 18,
     fontWeight: '600',
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 30,
+    marginVertical: Spacing.xxl,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: Colors.border,
   },
   dividerText: {
-    marginHorizontal: 16,
-    color: '#6B7280',
-    fontSize: 14,
+    marginHorizontal: Spacing.lg,
+    color: Colors.textMuted,
+    fontSize: 16,
   },
   loginButton: {
     backgroundColor: 'transparent',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 20,
+    borderRadius: BorderRadius.md,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#6366F1',
+    borderColor: Colors.primary,
   },
   loginButtonText: {
-    color: '#6366F1',
-    fontSize: 16,
+    color: Colors.primary,
+    fontSize: 18,
     fontWeight: '600',
   },
 });
