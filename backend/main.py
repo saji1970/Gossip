@@ -199,13 +199,17 @@ async def health_db():
 
 @app.post("/auth/register")
 async def register(req: RegisterRequest, session: AsyncSession = Depends(get_session)):
-    result = await auth_service.register_user(
-        session,
-        email=req.email,
-        password=req.password,
-        display_name=req.displayName,
-        username=req.username,
-    )
+    try:
+        result = await auth_service.register_user(
+            session,
+            email=req.email,
+            password=req.password,
+            display_name=req.displayName,
+            username=req.username,
+        )
+    except Exception as exc:
+        logger.exception("Register failed")
+        raise HTTPException(status_code=500, detail=str(exc))
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
