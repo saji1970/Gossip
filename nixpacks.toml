@@ -5,7 +5,7 @@ nixPkgs = ["python311", "ffmpeg", "libsndfile"]
 cmds = ["pip install -r backend/requirements.txt"]
 
 [start]
-cmd = "python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+cmd = "python -c \"import os; port=os.environ.get('PORT','8000'); import uvicorn; uvicorn.run('backend.main:app',host='0.0.0.0',port=int(port))\""
 
 [variables]
 PYTHONUNBUFFERED = "1"
