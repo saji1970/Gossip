@@ -320,24 +320,19 @@ async def is_group_member(session: AsyncSession, group_id: str, user_id: str) ->
 
 async def delete_group(session: AsyncSession, group_id: str, user_id: str) -> bool:
     """Delete a group and all its members/messages. Only the creator can delete."""
-    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import text
 
+    # Check ownership
     result = await session.execute(
-        select(GroupModel).where(
-            GroupModel.id == group_id, GroupModel.created_by == user_id
-        )
+        text("SELECT id FROM groups WHERE id = :gid AND created_by = :uid"),
+        {"gid": group_id, "uid": user_id},
     )
-    group = result.scalar_one_or_none()
-    if not group:
+    if result.first() is None:
         return False
 
-    # Bulk delete messages and members by group_id
-    await session.execute(
-        sa_delete(MessageModel).where(MessageModel.group_id == group_id)
-    )
-    await session.execute(
-        sa_delete(GroupMemberModel).where(GroupMemberModel.group_id == group_id)
-    )
-    await session.delete(group)
+    # Delete related rows then the group itself using raw SQL
+    await session.execute(text("DELETE FROM messages WHERE group_id = :gid"), {"gid": group_id})
+    await session.execute(text("DELETE FROM group_members WHERE group_id = :gid"), {"gid": group_id})
+    await session.execute(text("DELETE FROM groups WHERE id = :gid"), {"gid": group_id})
     await session.commit()
     return True
