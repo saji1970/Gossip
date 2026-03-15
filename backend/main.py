@@ -181,6 +181,19 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/health/db")
+async def health_db():
+    """Check database connectivity."""
+    try:
+        from backend.config import DATABASE_URL
+        from sqlalchemy import text
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"status": "ok", "db_url_prefix": DATABASE_URL[:30] + "..."}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
 # ── Auth Endpoints ────────────────────────────────────────────────
 
 
