@@ -32,6 +32,21 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ready")
+
+    # Ensure messages table has voice-message columns (safe to re-run)
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        for stmt in [
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'text'",
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS audio_file_path VARCHAR(500)",
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS audio_duration_ms INTEGER",
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS whisper_to TEXT",
+        ]:
+            try:
+                await conn.execute(text(stmt))
+            except Exception as exc:
+                logger.warning("Migration skipped: %s", exc)
+    logger.info("Schema migrations applied")
     # Start AI scheduler (non-critical — don't block startup)
     try:
         from backend.jobs.personality_update_job import start_scheduler, stop_scheduler
