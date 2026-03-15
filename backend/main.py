@@ -306,11 +306,20 @@ async def create_group(
 async def delete_group(
     group_id: str,
     user: dict = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
 ):
-    deleted = await group_service.delete_group(session, group_id, user["uid"])
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Group not found or not authorized")
+    """Delete a group using raw SQL to avoid ORM column-mapping issues."""
+    from sqlalchemy import text
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT id FROM groups WHERE id = :gid AND created_by = :uid"),
+            {"gid": group_id, "uid": user["uid"]},
+        )
+        if result.first() is None:
+            raise HTTPException(status_code=404, detail="Group not found or not authorized")
+        await conn.execute(text("DELETE FROM messages WHERE group_id = :gid"), {"gid": group_id})
+        await conn.execute(text("DELETE FROM group_members WHERE group_id = :gid"), {"gid": group_id})
+        await conn.execute(text("DELETE FROM groups WHERE id = :gid"), {"gid": group_id})
     return {"success": True}
 
 

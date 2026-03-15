@@ -319,7 +319,11 @@ async def is_group_member(session: AsyncSession, group_id: str, user_id: str) ->
 
 
 async def delete_group(session: AsyncSession, group_id: str, user_id: str) -> bool:
-    """Delete a group and all its members/messages. Only the creator can delete."""
+    """Delete a group and all its members/messages. Only the creator can delete.
+
+    Uses raw SQL throughout to avoid ORM column-mapping issues when the DB
+    schema is behind the model (e.g. missing message_type column).
+    """
     from sqlalchemy import text
 
     # Check ownership
@@ -329,6 +333,9 @@ async def delete_group(session: AsyncSession, group_id: str, user_id: str) -> bo
     )
     if result.first() is None:
         return False
+
+    # Expire all ORM-tracked objects so cascade doesn't fire
+    session.expire_all()
 
     # Delete related rows then the group itself using raw SQL
     await session.execute(text("DELETE FROM messages WHERE group_id = :gid"), {"gid": group_id})
