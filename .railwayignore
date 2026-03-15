@@ -1,0 +1,13 @@
+GossipAppFixed/
+mobile/
+docs/
+tests/
+tools/
+infra/
+.github/
+*.md
+*.sql
+*.pkg
+*.ps1
+*.bat
+.claude/
