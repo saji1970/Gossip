@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const API_BASE_URL = __DEV__
   ? 'http://localhost:8000'
-  : 'https://your-app.up.railway.app'; // Replace with Railway URL after deploy
+  : 'https://gossip-production-179e.up.railway.app';
 
 const TOKEN_KEY = 'gossip_auth_token';
 
