@@ -53,8 +53,8 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
     setLoading(true);
 
     try {
-      const { supabaseAuth } = await import('../../services/SupabaseAuthService');
-      const result = await supabaseAuth.signUp(email.trim(), password, name.trim(), username.trim().toLowerCase());
+      const { backendAuth } = await import('../../services/BackendAuthService');
+      const result = await backendAuth.signUp(email.trim(), password, name.trim(), username.trim().toLowerCase());
 
       if (!result.success || !result.user) {
         setLoading(false);

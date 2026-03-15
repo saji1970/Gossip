@@ -32,8 +32,8 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     setLoading(true);
 
     try {
-      const { supabaseAuth } = await import('../../services/SupabaseAuthService');
-      const result = await supabaseAuth.signIn(usernameOrEmail.trim(), password);
+      const { backendAuth } = await import('../../services/BackendAuthService');
+      const result = await backendAuth.signIn(usernameOrEmail.trim(), password);
 
       if (!result.success || !result.user) {
         setLoading(false);

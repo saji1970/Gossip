@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase, TABLES } from '../config/supabase';
 import { Group, GroupMember, MemberRole, MemberStatus } from '../utils/GroupStorage';
+import * as api from '../services/api';
 
 interface User {
   uid: string;
@@ -31,145 +31,100 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [groups, setGroups] = useState<Group[]>([]);
   const [initialized, setInitialized] = useState(false);
 
-  // Load user and groups from storage on app start
   useEffect(() => {
     loadUserData();
   }, []);
 
-  // Save groups to storage whenever they change
-  useEffect(() => {
-    if (initialized && user) {
-      saveGroupsToStorage();
-    }
-  }, [groups, initialized, user]);
-
   const loadUserData = async () => {
     try {
-      console.log('🔍 DEBUG: Starting loadUserData...');
-      
-      // Get current authenticated user from Supabase
-      console.log('🔥 DEBUG: Connecting to Supabase...');
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      console.log('📄 DEBUG: Supabase connection successful');
+      console.log('Loading user data from backend...');
 
-      if (authUser) {
-        console.log('👤 DEBUG: User authenticated:', authUser.id);
+      // Check if we have a stored token and get current user
+      const token = await api.getToken();
+      if (!token) {
+        console.log('No auth token found');
+        setInitialized(true);
+        return;
+      }
 
-        // Get user profile from database
-        const { data: profile, error: profileError } = await supabase
-          .from(TABLES.USERS)
-          .select('*')
-          .eq('id', authUser.id)
-          .single();
+      const result = await api.getMe();
+      if (result.success && result.user) {
+        console.log('User authenticated:', result.user.uid);
+        setUser(result.user as User);
 
-        if (profileError) {
-          console.error('❌ Error loading profile:', profileError);
-          setInitialized(true);
-          return;
-        }
-
-        if (profile) {
-          const userData: User = {
-            uid: authUser.id,
-            email: profile.email,
-            displayName: profile.display_name,
-            username: profile.username,
-          };
-          setUser(userData);
-
-          // Load user's groups
-          console.log('👥 DEBUG: Loading groups for user:', userData.uid);
-          const { data: groupsData, error: groupsError } = await supabase
-            .from(TABLES.GROUPS)
-            .select('*')
-            .eq('user_id', userData.uid)
-            .order('created_at', { ascending: false });
-
-          if (groupsError) {
-            console.error('❌ Error loading groups:', groupsError);
-          } else {
-            // Convert from database format to app format
-            const loadedGroups: Group[] = (groupsData || []).map((g: any) => ({
-              id: g.id,
-              name: g.name,
-              description: g.description,
-              privacy: g.privacy,
-              termsAndConditions: g.terms_and_conditions,
-              requireApproval: g.require_approval,
-              lastMessage: g.last_message || '',
-              timestamp: g.updated_at || g.created_at,
-              unreadCount: 0,
-              members: g.members || [],
-              createdBy: g.created_by,
-              createdAt: g.created_at,
-            }));
-            console.log('📊 DEBUG: Loaded', loadedGroups.length, 'groups');
-            setGroups(loadedGroups);
-          }
-        }
+        // Load user's groups
+        const loadedGroups = await api.getGroups();
+        console.log('Loaded', loadedGroups.length, 'groups');
+        setGroups(loadedGroups as Group[]);
       } else {
-        console.log('ℹ️ DEBUG: No authenticated user');
+        console.log('Token invalid, clearing');
+        await api.clearToken();
       }
 
-      console.log('✅ DEBUG: App initialization complete');
       setInitialized(true);
     } catch (error) {
-      console.error('❌ DEBUG: Error loading user data:', error);
+      console.error('Error loading user data:', error);
       setInitialized(true);
     }
   };
 
-  const saveGroupsToStorage = async () => {
-    if (!user) return;
-    
-    try {
-      // Save or update groups in Supabase
-      for (const group of groups) {
-        const dbGroup = {
-          id: group.id,
-          user_id: user.uid,
-          name: group.name,
-          description: group.description,
-          privacy: group.privacy,
-          terms_and_conditions: group.termsAndConditions,
-          require_approval: group.requireApproval,
-          last_message: group.lastMessage,
-          members: group.members,
-          created_by: group.createdBy,
-          created_at: group.createdAt,
-          updated_at: new Date().toISOString(),
-        };
-
-        await supabase
-          .from(TABLES.GROUPS)
-          .upsert(dbGroup, { onConflict: 'id' });
-      }
-    } catch (error) {
-      console.error('Error saving groups:', error);
-    }
-  };
-
-  const addGroup = (group: Group) => {
+  const addGroup = async (group: Group) => {
+    // Optimistic update
     setGroups(prev => [group, ...prev]);
+
+    // Persist to backend
+    try {
+      const created = await api.createGroup({
+        name: group.name,
+        description: group.description,
+        privacy: group.privacy,
+        termsAndConditions: group.termsAndConditions,
+        requireApproval: group.requireApproval,
+        members: group.members?.map(m => ({
+          email: m.email,
+          role: m.role,
+          status: m.status,
+        })) || [],
+      });
+      // Replace optimistic group with server response
+      setGroups(prev =>
+        prev.map(g => g.id === group.id ? (created as Group) : g)
+      );
+    } catch (error) {
+      console.error('Error creating group on backend:', error);
+    }
   };
 
-  const updateGroup = (groupId: string, updates: Partial<Group>) => {
+  const updateGroup = async (groupId: string, updates: Partial<Group>) => {
+    // Optimistic update
     setGroups(prev =>
       prev.map(group =>
         group.id === groupId ? { ...group, ...updates } : group
       )
     );
+
+    // Persist to backend
+    try {
+      await api.updateGroup(groupId, updates);
+    } catch (error) {
+      console.error('Error updating group on backend:', error);
+    }
   };
 
   const getGroupById = (groupId: string): Group | undefined => {
     return groups.find(g => g.id === groupId);
   };
 
-  const refreshGroups = () => {
-    loadUserData();
+  const refreshGroups = async () => {
+    try {
+      const loadedGroups = await api.getGroups();
+      setGroups(loadedGroups as Group[]);
+    } catch (error) {
+      console.error('Error refreshing groups:', error);
+    }
   };
 
-  const updateMemberRole = (groupId: string, memberEmail: string, role: MemberRole) => {
+  const updateMemberRole = async (groupId: string, memberEmail: string, role: MemberRole) => {
     setGroups(prev =>
       prev.map(group => {
         if (group.id === groupId) {
@@ -181,9 +136,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return group;
       })
     );
+
+    try {
+      await api.updateMemberRole(groupId, memberEmail, role);
+    } catch (error) {
+      console.error('Error updating member role:', error);
+    }
   };
 
-  const approveMember = (groupId: string, memberEmail: string, approverEmail: string) => {
+  const approveMember = async (groupId: string, memberEmail: string, approverEmail: string) => {
     setGroups(prev =>
       prev.map(group => {
         if (group.id === groupId) {
@@ -197,9 +158,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return group;
       })
     );
+
+    try {
+      await api.approveMember(groupId, memberEmail, approverEmail);
+    } catch (error) {
+      console.error('Error approving member:', error);
+    }
   };
 
-  const rejectMember = (groupId: string, memberEmail: string) => {
+  const rejectMember = async (groupId: string, memberEmail: string) => {
     setGroups(prev =>
       prev.map(group => {
         if (group.id === groupId) {
@@ -209,6 +176,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         return group;
       })
     );
+
+    try {
+      await api.rejectMember(groupId, memberEmail);
+    } catch (error) {
+      console.error('Error rejecting member:', error);
+    }
   };
 
   const getPendingApprovals = (groupId: string): GroupMember[] => {

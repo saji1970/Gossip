@@ -1,6 +1,240 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 const API_BASE_URL = __DEV__
   ? 'http://localhost:8000'
   : 'https://your-app.up.railway.app'; // Replace with Railway URL after deploy
+
+const TOKEN_KEY = 'gossip_auth_token';
+
+// ── Token management ──────────────────────────────────────────────
+
+export async function getToken(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function setToken(token: string): Promise<void> {
+  await AsyncStorage.setItem(TOKEN_KEY, token);
+}
+
+export async function clearToken(): Promise<void> {
+  await AsyncStorage.removeItem(TOKEN_KEY);
+}
+
+// ── Request helper ────────────────────────────────────────────────
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  authenticated: boolean = false,
+): Promise<T> {
+  const url = `${API_BASE_URL}${path}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (authenticated) {
+    const token = await getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
+  const res = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+// ── Auth types ────────────────────────────────────────────────────
+
+export interface User {
+  uid: string;
+  email: string;
+  displayName: string;
+  username?: string;
+}
+
+interface AuthResponse {
+  success: boolean;
+  error?: string;
+  user?: User;
+  token?: string;
+}
+
+// ── Auth endpoints ────────────────────────────────────────────────
+
+export async function register(
+  email: string,
+  password: string,
+  displayName: string,
+  username: string,
+): Promise<AuthResponse> {
+  return request<AuthResponse>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, displayName, username }),
+  });
+}
+
+export async function login(
+  usernameOrEmail: string,
+  password: string,
+): Promise<AuthResponse> {
+  return request<AuthResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ usernameOrEmail, password }),
+  });
+}
+
+export async function getMe(): Promise<{ success: boolean; user?: User }> {
+  return request<{ success: boolean; user?: User }>('/auth/me', {}, true);
+}
+
+export async function logout(): Promise<void> {
+  await clearToken();
+}
+
+// ── Group types ───────────────────────────────────────────────────
+
+export interface GroupMember {
+  email: string;
+  role: string;
+  status: string;
+  joinedAt: string;
+  approvedBy?: string;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  description?: string;
+  privacy: string;
+  termsAndConditions?: string;
+  requireApproval: boolean;
+  lastMessage: string;
+  timestamp: string;
+  unreadCount: number;
+  members: GroupMember[];
+  createdBy: string;
+  createdAt: string;
+}
+
+// ── Group endpoints ───────────────────────────────────────────────
+
+export async function getGroups(): Promise<Group[]> {
+  const res = await request<{ groups: Group[] }>('/groups', {}, true);
+  return res.groups;
+}
+
+export async function createGroup(data: {
+  name: string;
+  description?: string;
+  privacy?: string;
+  termsAndConditions?: string;
+  requireApproval?: boolean;
+  members?: Array<{ email: string; role?: string; status?: string }>;
+}): Promise<Group> {
+  const res = await request<{ group: Group }>('/groups', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }, true);
+  return res.group;
+}
+
+export async function updateGroup(
+  groupId: string,
+  updates: Record<string, any>,
+): Promise<Group> {
+  const res = await request<{ group: Group }>(`/groups/${groupId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  }, true);
+  return res.group;
+}
+
+export async function updateMemberRole(
+  groupId: string,
+  memberEmail: string,
+  role: string,
+): Promise<void> {
+  await request(`/groups/${groupId}/member-role`, {
+    method: 'PUT',
+    body: JSON.stringify({ memberEmail, role }),
+  }, true);
+}
+
+export async function approveMember(
+  groupId: string,
+  memberEmail: string,
+  approverEmail: string,
+): Promise<void> {
+  await request(`/groups/${groupId}/approve-member`, {
+    method: 'PUT',
+    body: JSON.stringify({ memberEmail, approverEmail }),
+  }, true);
+}
+
+export async function rejectMember(
+  groupId: string,
+  memberEmail: string,
+): Promise<void> {
+  await request(`/groups/${groupId}/reject-member`, {
+    method: 'PUT',
+    body: JSON.stringify({ memberEmail }),
+  }, true);
+}
+
+// ── Message types ─────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  groupId: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  isOwnMessage: boolean;
+  timestamp: string;
+}
+
+// ── Message endpoints ─────────────────────────────────────────────
+
+export async function getMessages(
+  groupId: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<ChatMessage[]> {
+  const res = await request<{ messages: ChatMessage[] }>(
+    `/groups/${groupId}/messages?limit=${limit}&offset=${offset}`,
+    {},
+    true,
+  );
+  return res.messages;
+}
+
+export async function sendMessage(
+  groupId: string,
+  senderName: string,
+  content: string,
+  isOwnMessage: boolean = true,
+): Promise<ChatMessage> {
+  const res = await request<{ message: ChatMessage }>('/messages', {
+    method: 'POST',
+    body: JSON.stringify({ groupId, senderName, content, isOwnMessage }),
+  }, true);
+  return res.message;
+}
+
+// ── AI endpoints (unchanged) ──────────────────────────────────────
 
 interface AnalysisResponse {
   speaker: string;
@@ -30,22 +264,6 @@ interface TrendingTopic {
   label: string;
   message_count: number;
   last_seen: number;
-}
-
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const url = `${API_BASE_URL}${path}`;
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${text}`);
-  }
-  return res.json();
 }
 
 export async function analyzeMessage(

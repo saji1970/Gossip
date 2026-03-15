@@ -5,11 +5,15 @@ import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.db import engine, get_session
 from backend.jobs.personality_update_job import start_scheduler, stop_scheduler
+from backend.models.database import Base
+from backend.services import auth_service, group_service
 from backend.services.conversation_pipeline import analyze_message, process_voice
 from backend.services.personality_engine import personality_engine
 from backend.services.topic_service import topic_service
@@ -24,6 +28,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Gossip AI backend")
+    # Create database tables
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables ready")
     start_scheduler()
     yield
     stop_scheduler()
@@ -32,7 +40,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Gossip AI Backend",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -45,7 +53,74 @@ app.add_middleware(
 )
 
 
+# ── Auth dependency ───────────────────────────────────────────────
+
+
+async def get_current_user(
+    authorization: Optional[str] = Header(None),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = authorization.split(" ", 1)[1]
+    user = await auth_service.get_current_user(session, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user
+
+
 # ── Request / Response Models ──────────────────────────────────────
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    displayName: str
+    username: str
+
+
+class LoginRequest(BaseModel):
+    usernameOrEmail: str
+    password: str
+
+
+class CreateGroupRequest(BaseModel):
+    name: str
+    description: str = ""
+    privacy: str = "private"
+    termsAndConditions: str = ""
+    requireApproval: bool = False
+    members: list[dict] = []
+
+
+class UpdateGroupRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    privacy: Optional[str] = None
+    requireApproval: Optional[bool] = None
+    lastMessage: Optional[str] = None
+    termsAndConditions: Optional[str] = None
+
+
+class MemberRoleRequest(BaseModel):
+    memberEmail: str
+    role: str
+
+
+class MemberApproveRequest(BaseModel):
+    memberEmail: str
+    approverEmail: str
+
+
+class MemberRejectRequest(BaseModel):
+    memberEmail: str
+
+
+class SendMessageRequest(BaseModel):
+    groupId: str
+    senderName: str
+    content: str
+    isOwnMessage: bool = True
 
 
 class MessageAnalyzeRequest(BaseModel):
@@ -93,12 +168,168 @@ class TopicResponse(BaseModel):
     last_seen: float
 
 
-# ── Endpoints ──────────────────────────────────────────────────────
+# ── Health ────────────────────────────────────────────────────────
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Auth Endpoints ────────────────────────────────────────────────
+
+
+@app.post("/auth/register")
+async def register(req: RegisterRequest, session: AsyncSession = Depends(get_session)):
+    result = await auth_service.register_user(
+        session,
+        email=req.email,
+        password=req.password,
+        display_name=req.displayName,
+        username=req.username,
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/auth/login")
+async def login(req: LoginRequest, session: AsyncSession = Depends(get_session)):
+    result = await auth_service.login_user(
+        session,
+        username_or_email=req.usernameOrEmail,
+        password=req.password,
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=401, detail=result["error"])
+    return result
+
+
+@app.get("/auth/me")
+async def me(user: dict = Depends(get_current_user)):
+    return {"success": True, "user": user}
+
+
+# ── Group Endpoints ───────────────────────────────────────────────
+
+
+@app.get("/groups")
+async def list_groups(
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    groups = await group_service.get_user_groups(session, user["uid"])
+    return {"groups": groups}
+
+
+@app.post("/groups")
+async def create_group(
+    req: CreateGroupRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    group = await group_service.create_group(
+        session,
+        user_id=user["uid"],
+        user_email=user["email"],
+        name=req.name,
+        description=req.description,
+        privacy=req.privacy,
+        terms_and_conditions=req.termsAndConditions,
+        require_approval=req.requireApproval,
+        members=req.members,
+    )
+    return {"group": group}
+
+
+@app.put("/groups/{group_id}")
+async def update_group(
+    group_id: str,
+    req: UpdateGroupRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    updates = req.model_dump(exclude_none=True)
+    group = await group_service.update_group(session, group_id, user["uid"], updates)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {"group": group}
+
+
+@app.put("/groups/{group_id}/member-role")
+async def update_member_role(
+    group_id: str,
+    req: MemberRoleRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ok = await group_service.update_member_role(session, group_id, req.memberEmail, req.role)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return {"success": True}
+
+
+@app.put("/groups/{group_id}/approve-member")
+async def approve_member(
+    group_id: str,
+    req: MemberApproveRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ok = await group_service.approve_member(
+        session, group_id, req.memberEmail, req.approverEmail
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return {"success": True}
+
+
+@app.put("/groups/{group_id}/reject-member")
+async def reject_member(
+    group_id: str,
+    req: MemberRejectRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    ok = await group_service.reject_member(session, group_id, req.memberEmail)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return {"success": True}
+
+
+# ── Message Endpoints ─────────────────────────────────────────────
+
+
+@app.get("/groups/{group_id}/messages")
+async def list_messages(
+    group_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    messages = await group_service.get_group_messages(session, group_id, limit, offset)
+    return {"messages": messages}
+
+
+@app.post("/messages")
+async def send_message(
+    req: SendMessageRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    msg = await group_service.save_message(
+        session,
+        group_id=req.groupId,
+        sender_id=user["uid"],
+        sender_name=req.senderName,
+        content=req.content,
+        is_own_message=req.isOwnMessage,
+    )
+    return {"message": msg}
+
+
+# ── AI Endpoints ──────────────────────────────────────────────────
 
 
 @app.post("/voice/process", response_model=AnalysisResponse)
