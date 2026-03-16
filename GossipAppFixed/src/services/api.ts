@@ -104,6 +104,16 @@ export async function logout(): Promise<void> {
   await clearToken();
 }
 
+export async function updateProfile(
+  displayName?: string,
+  username?: string,
+): Promise<{ success: boolean; user?: User; error?: string }> {
+  return request<{ success: boolean; user?: User; error?: string }>('/auth/profile', {
+    method: 'PUT',
+    body: JSON.stringify({ displayName, username }),
+  }, true);
+}
+
 // ── Group types ───────────────────────────────────────────────────
 
 export interface GroupMember {
@@ -288,6 +298,12 @@ export async function sendVoiceMessage(
 
 export function getAudioUrl(messageId: string): string {
   return `${API_BASE_URL}/audio/${messageId}`;
+}
+
+export async function deleteMessage(messageId: string): Promise<void> {
+  await request(`/messages/${messageId}`, {
+    method: 'DELETE',
+  }, true);
 }
 
 // ── AI endpoints (unchanged) ──────────────────────────────────────

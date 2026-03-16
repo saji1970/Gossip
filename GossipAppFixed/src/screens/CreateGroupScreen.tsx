@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,44 +9,93 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Animated,
 } from 'react-native';
+import Voice, {
+  SpeechResultsEvent,
+  SpeechErrorEvent,
+} from '@react-native-voice/voice';
 import { useApp } from '../context/AppContext';
 import { Group } from '../utils/GroupStorage';
 import { Colors, BorderRadius, Spacing } from '../constants/theme';
-import VoiceButton from '../components/voice/VoiceButton';
-import { useVoice } from '../hooks/useVoice';
 
 interface CreateGroupScreenProps {
   navigation?: any;
-  route?: { params?: { groupName?: string } };
+  route?: { params?: { groupName?: string; privacy?: 'public' | 'private'; requireApproval?: boolean } };
 }
+
+type VoiceState = 'idle' | 'listening' | 'processing' | 'error';
 
 const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route }) => {
   const { user, groups, addGroup } = useApp();
-  const { voiceState, isListening, startListening, stopListening, lastResult } = useVoice();
   const [groupName, setGroupName] = useState(route?.params?.groupName || '');
   const [groupDescription, setGroupDescription] = useState('');
-  const [privacy, setPrivacy] = useState<'public' | 'private'>('public');
+  const [privacy, setPrivacy] = useState<'public' | 'private'>(route?.params?.privacy || 'public');
   const [termsAndConditions, setTermsAndConditions] = useState('');
-  const [requireApproval, setRequireApproval] = useState(false);
+  const [requireApproval, setRequireApproval] = useState(route?.params?.requireApproval ?? false);
   const [loading, setLoading] = useState(false);
-  const [lastProcessedTimestamp, setLastProcessedTimestamp] = useState(0);
 
-  // Populate group name from voice result
+  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Pulse animation while listening
   useEffect(() => {
-    if (lastResult && lastResult.timestamp > lastProcessedTimestamp) {
-      setLastProcessedTimestamp(lastResult.timestamp);
-      setGroupName(lastResult.text);
-    }
-  }, [lastResult]);
-
-  const handleVoicePress = () => {
-    if (isListening) {
-      stopListening();
+    if (voiceState === 'listening') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.4, duration: 600, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ]),
+      );
+      loop.start();
+      return () => loop.stop();
     } else {
-      startListening();
+      pulseAnim.setValue(1);
     }
-  };
+  }, [voiceState]);
+
+  // Wire up Voice callbacks
+  useEffect(() => {
+    Voice.onSpeechResults = (e: SpeechResultsEvent) => {
+      const text = e.value?.[0] || '';
+      if (text) setGroupName(text);
+      setVoiceState('idle');
+    };
+
+    Voice.onSpeechPartialResults = (e: SpeechResultsEvent) => {
+      const text = e.value?.[0] || '';
+      if (text) setGroupName(text);
+    };
+
+    Voice.onSpeechError = (e: SpeechErrorEvent) => {
+      setVoiceState('error');
+      setTimeout(() => setVoiceState('idle'), 2000);
+    };
+
+    Voice.onSpeechEnd = () => {
+      setVoiceState((prev) => (prev === 'listening' ? 'processing' : prev));
+    };
+
+    return () => {
+      Voice.destroy().then(Voice.removeAllListeners);
+    };
+  }, []);
+
+  const handleVoicePress = useCallback(async () => {
+    if (voiceState === 'listening') {
+      try { await Voice.stop(); } catch {}
+      setVoiceState('idle');
+    } else {
+      try {
+        setVoiceState('listening');
+        await Voice.start('en-US');
+      } catch (err: any) {
+        Alert.alert('Voice Error', err.message || 'Could not start speech recognition');
+        setVoiceState('error');
+        setTimeout(() => setVoiceState('idle'), 2000);
+      }
+    }
+  }, [voiceState]);
 
   const handleCreateGroup = () => {
     const trimmedName = groupName.trim();
@@ -135,12 +184,24 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route
         <View style={styles.form}>
           {/* Voice input for group name */}
           <View style={styles.voiceSection}>
-            <Text style={styles.voiceHint}>Say the group name</Text>
-            <VoiceButton
-              voiceState={voiceState}
-              onPress={handleVoicePress}
-              size="medium"
-            />
+            <Text style={styles.voiceHint}>
+              {voiceState === 'listening' ? 'Listening...' : 'Tap to say the group name'}
+            </Text>
+            <Animated.View style={{ transform: [{ scale: voiceState === 'listening' ? pulseAnim : 1 }] }}>
+              <TouchableOpacity
+                style={[
+                  styles.voiceMicButton,
+                  voiceState === 'listening' && styles.voiceMicListening,
+                  voiceState === 'error' && styles.voiceMicError,
+                ]}
+                onPress={handleVoicePress}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.voiceMicIcon}>
+                  {voiceState === 'listening' ? '\u{1F3D9}' : '\u{1F3A4}'}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
           </View>
 
           <View style={styles.inputContainer}>
@@ -298,6 +359,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.textSecondary,
     marginBottom: Spacing.md,
+  },
+  voiceMicButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.voiceIdle,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+  },
+  voiceMicListening: {
+    backgroundColor: Colors.primary,
+  },
+  voiceMicError: {
+    backgroundColor: Colors.danger,
+  },
+  voiceMicIcon: {
+    fontSize: 32,
   },
   inputContainer: {
     marginBottom: Spacing.xl,

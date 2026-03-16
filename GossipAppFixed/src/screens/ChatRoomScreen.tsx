@@ -14,7 +14,10 @@ import { useApp } from '../context/AppContext';
 import { Colors, BorderRadius, Spacing } from '../constants/theme';
 import VoiceInputBar from '../components/voice/VoiceInputBar';
 import VoiceMessageBubble from '../components/voice/VoiceMessageBubble';
+import VoiceCommandOverlay from '../components/voice/VoiceCommandOverlay';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
+import { useTTS } from '../hooks/useTTS';
+import * as LastReadService from '../services/LastReadService';
 import { WhisperMember } from '../components/voice/WhisperPicker';
 import * as api from '../services/api';
 
@@ -49,6 +52,8 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
   const flatListRef = useRef<FlatList>(null);
 
   const playback = useAudioPlayback();
+  const tts = useTTS();
+  const [voiceOverlayVisible, setVoiceOverlayVisible] = useState(false);
 
   useEffect(() => {
     if (groupId) {
@@ -59,6 +64,17 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
       loadMessages();
     }
   }, [groupId]);
+
+  // Update last-read timestamp when messages change
+  useEffect(() => {
+    if (groupId && messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      const ts = lastMsg.timestamp instanceof Date
+        ? lastMsg.timestamp.getTime()
+        : new Date(lastMsg.timestamp).getTime();
+      LastReadService.setLastReadTimestamp(groupId, ts);
+    }
+  }, [groupId, messages.length]);
 
   const loadMessages = () => {
     if (groupId) {
@@ -135,6 +151,29 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }, 100);
   };
 
+  const handleDeleteMessage = (messageId: string) => {
+    Alert.alert(
+      'Delete message',
+      'Are you sure you want to delete this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            if (!groupId) return;
+            const groupMessages = messagesByGroup.get(groupId) || [];
+            const updated = groupMessages.filter(m => m.id !== messageId);
+            messagesByGroup.set(groupId, updated);
+            setMessages([...updated]);
+            // Best-effort backend delete
+            api.deleteMessage(messageId).catch(() => {});
+          },
+        },
+      ],
+    );
+  };
+
   const handleStartCall = (type: 'voice' | 'video') => {
     Alert.alert(
       `${type === 'voice' ? 'Voice' : 'Video'} Call`,
@@ -176,6 +215,43 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     return msg.isOwnMessage || msg.whisperTo.includes(currentEmail);
   });
 
+  const handleVoiceCommand = (type: string, payload: string) => {
+    switch (type) {
+      case 'read_latest':
+        tts.speakLatest(visibleMessages);
+        break;
+      case 'read_unread':
+        if (groupId) {
+          tts.speakUnread(groupId, visibleMessages);
+        }
+        break;
+      case 'send_message':
+        if (payload) handleSendMessage(payload);
+        break;
+      case 'call_group':
+        handleStartCall('voice');
+        break;
+      default:
+        break;
+    }
+  };
+
+  const handleReadAloudPress = () => {
+    if (tts.isSpeaking) {
+      tts.stop();
+    } else {
+      tts.speakLatest(visibleMessages);
+    }
+  };
+
+  const handleReadAloudLongPress = () => {
+    if (tts.isSpeaking) {
+      tts.stop();
+    } else if (groupId) {
+      tts.speakUnread(groupId, visibleMessages);
+    }
+  };
+
   // Resolve whisperTo emails to display names
   const getWhisperNames = (whisperTo?: string[]): string[] => {
     if (!whisperTo) return [];
@@ -190,11 +266,19 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     const avatarColor = avatarColors[message.senderName.length % avatarColors.length];
     const timeText = formatMessageTime(message.timestamp);
 
+    const Wrapper = message.isOwnMessage ? TouchableOpacity : View;
+    const wrapperProps = message.isOwnMessage
+      ? { onLongPress: () => handleDeleteMessage(message.id), activeOpacity: 0.7 }
+      : {};
+
     return (
-      <View style={[
-        styles.messageContainer,
-        message.isOwnMessage ? styles.ownMessage : styles.otherMessage,
-      ]}>
+      <Wrapper
+        style={[
+          styles.messageContainer,
+          message.isOwnMessage ? styles.ownMessage : styles.otherMessage,
+        ]}
+        {...wrapperProps}
+      >
         {!message.isOwnMessage && (
           <View style={styles.senderInfo}>
             <View style={[styles.senderAvatar, { backgroundColor: avatarColor }]}>
@@ -246,7 +330,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
             </Text>
           </View>
         )}
-      </View>
+      </Wrapper>
     );
   };
 
@@ -292,6 +376,25 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
             <Text style={styles.groupMembers}>
               {group.members?.filter(m => m.status === 'approved').length || 1} members {showMembers ? '\u25B2' : '\u25BC'}
             </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={handleReadAloudPress}
+            onLongPress={handleReadAloudLongPress}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.headerButtonIcon}>
+              {tts.isSpeaking ? '\u23F9' : '\u{1F50A}'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerButton}
+            onPress={() => setVoiceOverlayVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.headerButtonIcon}>{'\u{1F3A4}'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -361,6 +464,13 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
           groupMembers={whisperMembers}
         />
       </KeyboardAvoidingView>
+
+      <VoiceCommandOverlay
+        visible={voiceOverlayVisible}
+        onDismiss={() => setVoiceOverlayVisible(false)}
+        onCommand={handleVoiceCommand}
+        context="chat_room"
+      />
     </View>
   );
 };
@@ -409,6 +519,18 @@ const styles = StyleSheet.create({
   groupMembers: {
     fontSize: 14,
     color: Colors.textMuted,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.xs,
+  },
+  headerButtonIcon: {
+    fontSize: 18,
   },
   callButton: {
     width: 48,

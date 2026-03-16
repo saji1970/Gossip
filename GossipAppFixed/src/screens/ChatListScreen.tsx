@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Alert,
 } from 'react-native';
 import { Group } from '../utils/GroupStorage';
 import { useApp } from '../context/AppContext';
@@ -16,21 +15,8 @@ interface ChatListScreenProps {
   onRefresh?: boolean;
 }
 
-const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }) => {
-  const { user, groups } = useApp();
-  const [userProfile, setUserProfile] = useState({
-    name: 'User',
-    email: 'user@example.com',
-  });
-
-  useEffect(() => {
-    if (user) {
-      setUserProfile({
-        name: user.displayName,
-        email: user.email,
-      });
-    }
-  }, [user, onRefresh]);
+const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation }) => {
+  const { groups } = useApp();
 
   const handleCreateGroup = () => {
     if (navigation) {
@@ -44,18 +30,30 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
     }
   };
 
-  const handleGroupSettings = (group: Group) => {
-    if (navigation) {
-      navigation.navigate('GroupSettings', { group });
+  const formatTimestamp = (timestamp: string) => {
+    if (!timestamp) return '';
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) return 'now';
+      if (diffMins < 60) return `${diffMins}m`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}d`;
+    } catch {
+      return '';
     }
   };
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Text style={styles.emptyIcon}>🎙️</Text>
+      <Text style={styles.emptyIcon}>{'\u{1F465}'}</Text>
       <Text style={styles.emptyTitle}>No Groups Yet</Text>
       <Text style={styles.emptyText}>
-        Say "create group" to get started
+        Create your first group to get started
       </Text>
       <TouchableOpacity style={styles.createButton} onPress={handleCreateGroup}>
         <Text style={styles.createButtonText}>Create Group</Text>
@@ -63,52 +61,42 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
     </View>
   );
 
-  const renderChatItem = ({ item }: { item: Group }) => {
+  const renderGroupCard = ({ item }: { item: Group }) => {
     const approvedMembers = item.members.filter(m => m.status === 'approved');
-    const pendingCount = item.members.filter(m => m.status === 'pending').length;
-    const isAdmin = item.members.find(m => m.email === user?.email)?.role === 'admin';
+    const memberCount = approvedMembers.length || 1;
 
     return (
       <TouchableOpacity
-        style={styles.chatItem}
+        style={styles.groupCard}
         onPress={() => handleChatPress(item)}
-        onLongPress={() => handleGroupSettings(item)}
+        activeOpacity={0.7}
       >
-        <View style={styles.chatAvatar}>
-          <Text style={styles.chatAvatarText}>{item.name[0].toUpperCase()}</Text>
-          {item.privacy === 'private' && (
-            <View style={styles.privacyIndicator}>
-              <Text style={styles.privacyIcon}>🔒</Text>
+        {/* Group Icon */}
+        <View style={styles.groupIconContainer}>
+          <Text style={styles.groupIcon}>{'\u{1F465}'}</Text>
+        </View>
+
+        {/* Group Info */}
+        <View style={styles.groupInfo}>
+          <Text style={styles.groupName} numberOfLines={1}>{item.name}</Text>
+          <Text style={styles.groupMembers}>
+            {memberCount} member{memberCount !== 1 ? 's' : ''}
+          </Text>
+          <Text style={styles.groupLastMessage} numberOfLines={1}>
+            {item.lastMessage || 'No messages yet'}
+          </Text>
+        </View>
+
+        {/* Right side: time + unread badge */}
+        <View style={styles.groupRight}>
+          <Text style={styles.groupTimestamp}>
+            {formatTimestamp(item.timestamp)}
+          </Text>
+          {item.unreadCount > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
             </View>
           )}
-        </View>
-        <View style={styles.chatInfo}>
-          <View style={styles.chatHeader}>
-            <View style={styles.chatNameContainer}>
-              <Text style={styles.chatName} numberOfLines={1}>{item.name}</Text>
-              {isAdmin && pendingCount > 0 && (
-                <View style={styles.pendingBadge}>
-                  <Text style={styles.pendingBadgeText}>{pendingCount}</Text>
-                </View>
-              )}
-            </View>
-            {isAdmin && (
-              <TouchableOpacity
-                onPress={() => handleGroupSettings(item)}
-                style={styles.settingsButton}
-              >
-                <Text style={styles.settingsButtonText}>⚙️</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          <View style={styles.chatFooter}>
-            <Text style={styles.chatMessage} numberOfLines={1}>
-              {item.lastMessage}
-            </Text>
-            <Text style={styles.memberCount}>
-              {approvedMembers.length} member{approvedMembers.length !== 1 ? 's' : ''}
-            </Text>
-          </View>
         </View>
       </TouchableOpacity>
     );
@@ -116,20 +104,15 @@ const ChatListScreen: React.FC<ChatListScreenProps> = ({ navigation, onRefresh }
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Gossip</Text>
-      </View>
-
-      {/* Chat List or Empty State */}
       {groups.length === 0 ? (
         renderEmptyState()
       ) : (
         <FlatList
           data={groups}
-          renderItem={renderChatItem}
+          renderItem={renderGroupCard}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
         />
       )}
     </View>
@@ -141,20 +124,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  header: {
-    backgroundColor: Colors.background,
-    paddingTop: 54,
-    paddingBottom: Spacing.xl,
-    paddingHorizontal: Spacing.xl,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: Colors.textPrimary,
-  },
-  // Empty state
+  // ── Empty state ──
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -189,101 +159,77 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-  // List
+  // ── Group list ──
   listContainer: {
-    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.lg,
   },
-  chatItem: {
+  groupCard: {
     flexDirection: 'row',
-    padding: Spacing.xl,
+    alignItems: 'center',
     backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    alignItems: 'center',
-    minHeight: 88,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
   },
-  chatAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: Colors.primary,
-    justifyContent: 'center',
+  groupIconContainer: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
+    justifyContent: 'center',
     marginRight: Spacing.lg,
-    position: 'relative',
   },
-  chatAvatarText: {
-    color: Colors.white,
-    fontSize: 24,
-    fontWeight: 'bold',
+  groupIcon: {
+    fontSize: 32,
+    color: Colors.primary,
   },
-  privacyIndicator: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  privacyIcon: {
-    fontSize: 12,
-  },
-  chatNameContainer: {
+  groupInfo: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    marginRight: Spacing.sm,
   },
-  pendingBadge: {
-    backgroundColor: Colors.warning,
-    borderRadius: 10,
-    minWidth: 22,
-    height: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-  },
-  pendingBadgeText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  settingsButton: {
-    padding: Spacing.sm,
-  },
-  settingsButtonText: {
-    fontSize: 22,
-  },
-  chatInfo: {
-    flex: 1,
-  },
-  chatHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.xs,
-  },
-  chatName: {
-    fontSize: 20,
-    fontWeight: '600',
+  groupName: {
+    fontSize: 18,
+    fontWeight: '700',
     color: Colors.textPrimary,
+    marginBottom: 3,
   },
-  chatFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  chatMessage: {
-    fontSize: 16,
+  groupMembers: {
+    fontSize: 14,
     color: Colors.textSecondary,
-    flex: 1,
+    marginBottom: 3,
   },
-  memberCount: {
+  groupLastMessage: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+  },
+  groupRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    minWidth: 40,
+  },
+  groupTimestamp: {
     fontSize: 14,
     color: Colors.textMuted,
-    marginLeft: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  unreadBadge: {
+    backgroundColor: Colors.unreadBadge,
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  unreadBadgeText: {
+    color: Colors.white,
+    fontSize: 13,
+    fontWeight: 'bold',
   },
 });
 

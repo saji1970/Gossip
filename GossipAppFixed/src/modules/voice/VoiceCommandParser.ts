@@ -6,6 +6,10 @@ export type CommandType =
   | 'call_group'
   | 'navigate'
   | 'open_chat'
+  | 'private_chat'
+  | 'whisper'
+  | 'read_latest'
+  | 'read_unread'
   | 'unknown';
 
 export interface VoiceCommand {
@@ -33,10 +37,23 @@ const commandPatterns: CommandPattern[] = [
   {
     type: 'create_group',
     patterns: [
+      // Explicit: "create/new/make/start group ..."
       /^(?:create|new|make|start)\s+(?:a\s+)?group\s+(?:called?|named)\s+(.+)$/i,
       /^(?:create|new|make|start)\s+(?:a\s+)?group\s*(.*)$/i,
+      // Natural: "group name is X ..."
+      /^group\s+name\s+(?:is|it's)\s+(.+)$/i,
+      // Natural: "group X it's a public/private ..."
+      /^group\s+(.+?\b)\s+(?:it'?s|is)\s+(?:a\s+)?(?:public|private)\b(.*)$/i,
     ],
-    extractPayload: (match) => match[1]?.trim() || '',
+    extractPayload: (match) => {
+      // For pattern 4, concat captured groups
+      if (match[2] !== undefined) {
+        const rest = match[2].trim();
+        const nameAndRest = match[1].trim() + (rest ? " it's " + rest : '');
+        return nameAndRest;
+      }
+      return match[1]?.trim() || '';
+    },
   },
   {
     type: 'call_group',
@@ -53,6 +70,61 @@ const commandPatterns: CommandPattern[] = [
     extractPayload: (match) => match[1].toLowerCase().replace(/s$/, ''),
   },
   {
+    type: 'private_chat',
+    patterns: [
+      // "private chat with John", "privately message John"
+      /^(?:private\s+chat\s+with|privately\s+message|privately\s+talk\s+to|private\s+message)\s+(.+)$/i,
+      // "DM John", "direct message John"
+      /^(?:dm|direct\s+message)\s+(.+)$/i,
+      // "speak privately with John", "talk privately with John"
+      /^(?:speak|talk|chat)\s+privately\s+(?:with|to)\s+(.+)$/i,
+    ],
+    extractPayload: (match) => match[1].trim(),
+  },
+  {
+    type: 'whisper',
+    patterns: [
+      // "whisper to John and Sarah hey what's up"
+      /^whisper\s+to\s+(.+?)\s+(?:that|say|saying)\s+(.+)$/i,
+      // "whisper to John and Sarah" (no message body yet)
+      /^whisper\s+to\s+(.+)$/i,
+      // "whisper hey what's up" (message to selected members, targets chosen via UI)
+      /^whisper\s+(.+)$/i,
+    ],
+    extractPayload: (match) => {
+      // Pattern with both targets and message
+      if (match[2] !== undefined) {
+        return JSON.stringify({ targets: match[1].trim(), message: match[2].trim() });
+      }
+      // "whisper to [names]" — check if it came from the "to" pattern
+      const raw = match[0] || '';
+      if (/^whisper\s+to\s+/i.test(raw)) {
+        return JSON.stringify({ targets: match[1].trim(), message: '' });
+      }
+      // "whisper [message]" — no explicit targets
+      return JSON.stringify({ targets: '', message: match[1].trim() });
+    },
+  },
+  {
+    type: 'read_latest',
+    patterns: [
+      /^(?:read\s+(?:the\s+)?(?:latest|last|newest|most\s+recent)\s+message)$/i,
+      /^(?:what'?s?\s+the\s+latest\s+message)$/i,
+      /^(?:read\s+(?:the\s+)?latest)$/i,
+    ],
+    extractPayload: () => '',
+  },
+  {
+    type: 'read_unread',
+    patterns: [
+      /^(?:read\s+(?:the\s+)?(?:unread|new)\s+messages?)$/i,
+      /^(?:read\s+(?:all\s+)?messages?)$/i,
+      /^(?:catch\s+me\s+up)$/i,
+      /^(?:what\s+did\s+I\s+miss)$/i,
+    ],
+    extractPayload: () => '',
+  },
+  {
     type: 'open_chat',
     patterns: [
       /^(?:open\s+chat\s+with|talk\s+to|chat\s+with|message)\s+(.+)$/i,
@@ -61,21 +133,59 @@ const commandPatterns: CommandPattern[] = [
   },
 ];
 
+/**
+ * Pre-process speech text to fix common recognition errors.
+ */
+function fixSpeechErrors(text: string): string {
+  return text
+    // "grow" → "group" (common mishearing)
+    .replace(/\bpublic\s+grow\b/gi, 'public group')
+    .replace(/\bprivate\s+grow\b/gi, 'private group')
+    // "a patrol approval" → "approval"
+    .replace(/\ba\s+patrol\s+approval\b/gi, 'approval')
+    // "request draw approval" → "requires approval"
+    .replace(/\brequest\s+draw\s+approval\b/gi, 'requires approval')
+    // "requires to draw approval" → "requires approval"
+    .replace(/\brequires?\s+to\s+draw\s+approval\b/gi, 'requires approval')
+    // "approved" → "approval" when followed by "for"
+    .replace(/\bapproved\s+for\b/gi, 'approval for')
+    // "Crow" → "group" in context
+    .replace(/\bpublic\s+Crow\b/gi, 'public group');
+}
+
 export function parseCommand(text: string): VoiceCommand {
-  const trimmed = text.trim();
+  const trimmed = fixSpeechErrors(text.trim());
 
   for (const cmd of commandPatterns) {
     for (const pattern of cmd.patterns) {
       const match = trimmed.match(pattern);
       if (match) {
+        let payload = cmd.extractPayload(match);
+
+        // For create_group, extract settings from natural language
+        if (cmd.type === 'create_group' && payload) {
+          payload = extractGroupSettings(payload);
+        }
+
         return {
           type: cmd.type,
-          payload: cmd.extractPayload(match),
+          payload,
           rawText: trimmed,
           confidence: 0.9,
         };
       }
     }
+  }
+
+  // Fallback: if the text contains group creation keywords, treat as create_group
+  if (/\bgroup\b/i.test(trimmed) && (/\bpublic\b|\bprivate\b|\bapproval\b|\bname\s+is\b/i.test(trimmed))) {
+    const payload = extractGroupSettings(trimmed);
+    return {
+      type: 'create_group',
+      payload,
+      rawText: trimmed,
+      confidence: 0.7,
+    };
   }
 
   return {
@@ -86,6 +196,69 @@ export function parseCommand(text: string): VoiceCommand {
   };
 }
 
+/**
+ * Parse natural language group creation into a JSON payload.
+ * Handles various phrasings:
+ *   "friends it's a public group and requires approval for new members"
+ *   "friend"  (just a name)
+ */
+function extractGroupSettings(raw: string): string {
+  let text = raw;
+  let privacy: 'public' | 'private' | undefined;
+  let requireApproval: boolean | undefined;
+
+  // Check for privacy keywords
+  if (/\bprivate\b/i.test(text)) {
+    privacy = 'private';
+  } else if (/\bpublic\b/i.test(text)) {
+    privacy = 'public';
+  }
+
+  // Check for approval keywords (flexible matching)
+  if (/\brequire[s]?\s+approval\b/i.test(text) ||
+      /\bapproval\s+required\b/i.test(text) ||
+      /\bwith\s+approval\b/i.test(text) ||
+      /\bapproval\s+for\s+new\b/i.test(text) ||
+      /\brequire[s]?\s+.*?approval\b/i.test(text)) {
+    requireApproval = true;
+  } else if (/\bno\s+approval\b/i.test(text) || /\bwithout\s+approval\b/i.test(text)) {
+    requireApproval = false;
+  }
+
+  // If no settings were found, treat the whole string as the group name
+  if (privacy === undefined && requireApproval === undefined) {
+    return text;
+  }
+
+  // Extract group name by stripping setting phrases
+  let name = text
+    // Remove "group name is" prefix
+    .replace(/^group\s+name\s+(?:is|it's)\s+/i, '')
+    // Remove "it's a public/private group"
+    .replace(/\b(it'?s\s+)?a?\s*(public|private)\s*(group|grow|Crow)?\b/gi, '')
+    // Remove approval phrases
+    .replace(/\b(and\s+)?(require[s]?\s+.*?approval|approval\s+required|with\s+approval|no\s+approval|without\s+approval)(\s+for\s+new\s+members?)?\b/gi, '')
+    // Remove orphan "and"
+    .replace(/\band\b/gi, '')
+    // Remove "for new members"
+    .replace(/\bfor\s+new\s+members?\b/gi, '')
+    // Clean up whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // If name is empty after stripping, use the raw text before settings
+  if (!name) {
+    name = '';
+  }
+
+  // Build JSON payload
+  const settings: any = { name };
+  if (privacy !== undefined) settings.privacy = privacy;
+  if (requireApproval !== undefined) settings.requireApproval = requireApproval;
+
+  return JSON.stringify(settings);
+}
+
 export type ScreenContext = 'chat_list' | 'chat_room' | 'create_group' | 'settings' | 'auth' | 'global';
 
 export function getSuggestions(context: ScreenContext): string[] {
@@ -94,13 +267,16 @@ export function getSuggestions(context: ScreenContext): string[] {
       return [
         '"Create group [name]"',
         '"Open chat with [name]"',
+        '"Private chat with [name]"',
         '"Go to settings"',
       ];
     case 'chat_room':
       return [
         '"Say [message]"',
+        '"Read latest message"',
+        '"Read unread messages"',
+        '"Whisper to [name] [message]"',
         '"Call"',
-        '"Go to chats"',
       ];
     case 'create_group':
       return [
@@ -112,6 +288,7 @@ export function getSuggestions(context: ScreenContext): string[] {
         '"Create group"',
         '"Go to chats"',
         '"Open chat with [name]"',
+        '"Private chat with [name]"',
       ];
     default:
       return ['"Say [message]"', '"Create group"'];

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Group, GroupMember, MemberRole, MemberStatus } from '../utils/GroupStorage';
 import * as api from '../services/api';
+import * as NotificationService from '../services/NotificationService';
 
 interface User {
   uid: string;
@@ -23,6 +24,7 @@ interface AppContextType {
   rejectMember: (groupId: string, memberEmail: string) => void;
   getPendingApprovals: (groupId: string) => GroupMember[];
   loadUserData: () => Promise<void>;
+  updateProfile: (displayName?: string, username?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -57,6 +59,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const loadedGroups = await api.getGroups();
         console.log('Loaded', loadedGroups.length, 'groups');
         setGroups(loadedGroups as Group[]);
+
+        // Start notification polling
+        NotificationService.startPolling(loadedGroups as Group[], result.user.email);
       } else {
         console.log('Token invalid, clearing');
         await api.clearToken();
@@ -66,6 +71,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     } catch (error) {
       console.error('Error loading user data:', error);
       setInitialized(true);
+    }
+  };
+
+  const handleSetUser = (newUser: User | null) => {
+    setUser(newUser);
+    if (!newUser) {
+      NotificationService.stopPolling();
     }
   };
 
@@ -129,6 +141,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     try {
       const loadedGroups = await api.getGroups();
       setGroups(loadedGroups as Group[]);
+
+      // Restart polling with updated group list
+      if (user) {
+        NotificationService.startPolling(loadedGroups as Group[], user.email);
+      }
     } catch (error) {
       console.error('Error refreshing groups:', error);
     }
@@ -200,11 +217,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return group.members.filter(m => m.status === 'pending');
   };
 
+  const updateProfile = async (displayName?: string, username?: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const result = await api.updateProfile(displayName, username);
+      if (result.success && result.user) {
+        setUser(result.user as User);
+        return { success: true };
+      }
+      return { success: false, error: result.error || 'Update failed' };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Update failed' };
+    }
+  };
+
   return (
     <AppContext.Provider
       value={{
         user,
-        setUser,
+        setUser: handleSetUser,
         groups,
         addGroup,
         updateGroup,
@@ -216,6 +246,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         rejectMember,
         getPendingApprovals,
         loadUserData,
+        updateProfile,
       }}
     >
       {children}

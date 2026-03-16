@@ -10,10 +10,11 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import engine, get_session
-from backend.models.database import Base
+from backend.models.database import Base, UserModel
 from backend.services import auth_service, group_service
 
 AUDIO_UPLOAD_DIR = os.getenv("AUDIO_UPLOAD_DIR", "audio_uploads")
@@ -152,6 +153,11 @@ class MemberRejectRequest(BaseModel):
     memberEmail: str
 
 
+class UpdateProfileRequest(BaseModel):
+    displayName: Optional[str] = None
+    username: Optional[str] = None
+
+
 class SendMessageRequest(BaseModel):
     groupId: str
     senderName: str
@@ -280,6 +286,50 @@ async def login(req: LoginRequest, session: AsyncSession = Depends(get_session))
 @app.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return {"success": True, "user": user}
+
+
+@app.put("/auth/profile")
+async def update_profile(
+    req: UpdateProfileRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(UserModel).where(UserModel.id == user["uid"])
+    )
+    db_user = result.scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if req.username is not None:
+        clean = req.username.strip().lower()
+        if len(clean) < 3:
+            raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
+        if " " in clean or "@" in clean:
+            raise HTTPException(status_code=400, detail="Username cannot contain spaces or @")
+        # Check uniqueness
+        existing = await session.execute(
+            select(UserModel).where(UserModel.username == clean, UserModel.id != user["uid"])
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Username already taken")
+        db_user.username = clean
+
+    if req.displayName is not None:
+        if len(req.displayName.strip()) < 1:
+            raise HTTPException(status_code=400, detail="Display name cannot be empty")
+        db_user.display_name = req.displayName.strip()
+
+    await session.commit()
+    await session.refresh(db_user)
+
+    updated = {
+        "uid": db_user.id,
+        "email": db_user.email,
+        "displayName": db_user.display_name,
+        "username": db_user.username,
+    }
+    return {"success": True, "user": updated}
 
 
 # ── Group Endpoints ───────────────────────────────────────────────
@@ -433,6 +483,25 @@ async def send_message(
         is_own_message=req.isOwnMessage,
     )
     return {"message": msg}
+
+
+@app.delete("/messages/{message_id}")
+async def delete_message(
+    message_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Delete a message. Only the sender can delete their own messages."""
+    from sqlalchemy import text
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT id FROM messages WHERE id = :mid AND sender_id = :uid"),
+            {"mid": message_id, "uid": user["uid"]},
+        )
+        if result.first() is None:
+            raise HTTPException(status_code=404, detail="Message not found or not authorized")
+        await conn.execute(text("DELETE FROM messages WHERE id = :mid"), {"mid": message_id})
+    return {"success": True}
 
 
 # ── Voice Message Endpoints ───────────────────────────────────────

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import { Colors, BorderRadius, Spacing } from '../../constants/theme';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
+import { useAudioPlayback } from '../../hooks/useAudioPlayback';
+import { useHardwareButton } from '../../hooks/useHardwareButton';
 import WhisperPicker, { WhisperMember } from './WhisperPicker';
 
 interface VoiceInputBarProps {
@@ -33,10 +35,43 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
   groupMembers = [],
 }) => {
   const { isRecording, recordingDurationMs, startRecording, stopRecording, cancelRecording } = useAudioRecorder();
+  const playback = useAudioPlayback();
   const [isTextMode, setIsTextMode] = useState(false);
   const [textInput, setTextInput] = useState('');
   const [showWhisperPicker, setShowWhisperPicker] = useState(false);
   const [pendingWhisperTo, setPendingWhisperTo] = useState<string[] | undefined>(undefined);
+  const [pendingRecording, setPendingRecording] = useState<{ uri: string; durationMs: number } | null>(null);
+
+  // Track recording state in a ref so hardware button callbacks see the latest value
+  const isRecordingRef = useRef(false);
+  isRecordingRef.current = isRecording;
+
+  const handleHardwarePress = useCallback(async () => {
+    // Only start if idle (not already recording, not in review, not in text mode)
+    if (isRecordingRef.current || disabled) return;
+    try {
+      await startRecording();
+    } catch (err: any) {
+      Alert.alert('Recording Error', err.message || 'Could not start recording');
+    }
+  }, [startRecording, disabled]);
+
+  const handleHardwareRelease = useCallback(async () => {
+    if (!isRecordingRef.current) return;
+    try {
+      const result = await stopRecording();
+      setPendingRecording({ uri: result.uri, durationMs: result.durationMs });
+    } catch (err: any) {
+      Alert.alert('Recording Error', err.message || 'Could not stop recording');
+    }
+  }, [stopRecording]);
+
+  // Volume-down push-to-talk: hold to record, release to review
+  useHardwareButton({
+    onPress: handleHardwarePress,
+    onRelease: handleHardwareRelease,
+    enabled: !isTextMode && !pendingRecording,
+  });
 
   const handleTextSend = () => {
     if (!textInput.trim()) return;
@@ -52,16 +87,28 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
     }
   };
 
-  const handleStopAndSend = async () => {
+  const handleStopAndReview = async () => {
     try {
       const result = await stopRecording();
-      if (onSendVoiceMessage) {
-        onSendVoiceMessage(result.uri, result.durationMs, pendingWhisperTo);
-      }
-      setPendingWhisperTo(undefined);
+      setPendingRecording({ uri: result.uri, durationMs: result.durationMs });
     } catch (err: any) {
       Alert.alert('Recording Error', err.message || 'Could not stop recording');
     }
+  };
+
+  const handleConfirmSend = () => {
+    if (pendingRecording && onSendVoiceMessage) {
+      playback.stop();
+      onSendVoiceMessage(pendingRecording.uri, pendingRecording.durationMs, pendingWhisperTo);
+    }
+    setPendingRecording(null);
+    setPendingWhisperTo(undefined);
+  };
+
+  const handleDiscardRecording = () => {
+    playback.stop();
+    setPendingRecording(null);
+    setPendingWhisperTo(undefined);
   };
 
   const handleCancelRecording = async () => {
@@ -133,8 +180,42 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
             )}
           </View>
 
-          <TouchableOpacity style={styles.sendRecordingButton} onPress={handleStopAndSend}>
-            <Text style={styles.sendRecordingIcon}>&#x27A4;</Text>
+          <TouchableOpacity style={styles.sendRecordingButton} onPress={handleStopAndReview}>
+            <Text style={styles.sendRecordingIcon}>&#x23F9;</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Review mode (after recording, before sending) ─────────
+  if (pendingRecording) {
+    const isPreviewPlaying = playback.isPlaying && playback.currentUri === pendingRecording.uri;
+    return (
+      <View style={styles.container}>
+        <View style={styles.reviewRow}>
+          <TouchableOpacity style={styles.discardButton} onPress={handleDiscardRecording}>
+            <Text style={styles.discardIcon}>{'\u{1F5D1}'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.previewPlayButton}
+            onPress={() => playback.play(pendingRecording.uri, pendingRecording.durationMs)}
+          >
+            <Text style={styles.previewPlayIcon}>{isPreviewPlaying ? '\u23F8' : '\u25B6'}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.reviewInfo}>
+            <Text style={styles.reviewDuration}>
+              {formatRecordingTime(pendingRecording.durationMs)}
+            </Text>
+            {pendingWhisperTo && (
+              <Text style={styles.whisperBadge}>&#x1F512; Whisper</Text>
+            )}
+          </View>
+
+          <TouchableOpacity style={styles.confirmSendButton} onPress={handleConfirmSend}>
+            <Text style={styles.confirmSendIcon}>&#x27A4;</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -159,7 +240,7 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
           activeOpacity={0.7}
         >
           <Text style={styles.micIcon}>&#x1F3A4;</Text>
-          <Text style={styles.micLabel}>Tap to record</Text>
+          <Text style={styles.micLabel}>Tap or hold Vol Down</Text>
         </TouchableOpacity>
 
         {groupMembers.length > 0 && (
@@ -292,6 +373,62 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendRecordingIcon: {
+    fontSize: 20,
+    color: Colors.white,
+  },
+  // ── Review mode ──
+  reviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.sm,
+  },
+  discardButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  discardIcon: {
+    fontSize: 20,
+    color: Colors.danger,
+  },
+  previewPlayButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: Spacing.sm,
+  },
+  previewPlayIcon: {
+    fontSize: 18,
+    color: Colors.primary,
+  },
+  reviewInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+  },
+  reviewDuration: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  confirmSendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmSendIcon: {
     fontSize: 20,
     color: Colors.white,
   },

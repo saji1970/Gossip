@@ -1,10 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar, Text, View, StyleSheet } from 'react-native';
 import SimpleNavigator from './src/navigation/SimpleNavigator';
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AppProvider } from './src/context/AppContext';
 import { PersonalityProvider } from './src/context/PersonalityContext';
+import * as TTSService from './src/services/TTSService';
 
 type Screen = 'Login' | 'Register' | 'MainTabs' | 'ChatList' | 'CreateGroup' | 'InviteMembers' | 'ChatRoom' | 'GroupSettings' | 'TermsAgreement' | 'GroupCall';
+
+const ThemedStatusBar = () => {
+  const { mode, colors } = useTheme();
+  return (
+    <StatusBar
+      barStyle={mode === 'dark' ? 'light-content' : 'dark-content'}
+      backgroundColor={colors.background}
+    />
+  );
+};
 
 const App = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen>('Login');
@@ -16,6 +28,7 @@ const App = () => {
     try {
       console.log('Testing Firebase connection...');
       console.log('Testing Firestore storage...');
+      TTSService.initialize();
     } catch (err) {
       console.error('App initialization error:', err);
       setError(`App init error: ${err}`);
@@ -39,16 +52,18 @@ const App = () => {
   }
 
   return (
-    <AppProvider>
-      <PersonalityProvider>
-        <StatusBar barStyle="light-content" backgroundColor="#0F172A" />
-        <SimpleNavigator
-          currentScreen={currentScreen}
-          onNavigate={handleNavigate}
-          params={screenParams}
-        />
-      </PersonalityProvider>
-    </AppProvider>
+    <ThemeProvider>
+      <AppProvider>
+        <PersonalityProvider>
+          <ThemedStatusBar />
+          <SimpleNavigator
+            currentScreen={currentScreen}
+            onNavigate={handleNavigate}
+            params={screenParams}
+          />
+        </PersonalityProvider>
+      </AppProvider>
+    </ThemeProvider>
   );
 };
 

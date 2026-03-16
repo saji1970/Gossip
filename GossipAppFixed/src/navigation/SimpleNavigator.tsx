@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { RegisterScreen } from '../screens/auth/RegisterScreen';
-import ChatListScreen from '../screens/ChatListScreen';
+import MainTabsScreen from '../screens/MainTabsScreen';
 import CreateGroupScreen from '../screens/CreateGroupScreen';
 import InviteMembersScreen from '../screens/InviteMembersScreen';
 import ChatRoomScreen from '../screens/ChatRoomScreen';
@@ -20,7 +20,7 @@ interface NavigationProps {
 }
 
 // Screens where FloatingMicButton should be hidden
-const HIDE_FAB_SCREENS: Screen[] = ['Login', 'Register', 'ChatRoom', 'GroupCall'];
+const HIDE_FAB_SCREENS: Screen[] = ['Login', 'Register', 'ChatRoom', 'GroupCall', 'MainTabs', 'ChatList'];
 
 const SimpleNavigator: React.FC<NavigationProps> = ({ currentScreen, onNavigate, params }) => {
   const navigation = {
@@ -39,7 +39,7 @@ const SimpleNavigator: React.FC<NavigationProps> = ({ currentScreen, onNavigate,
         return <RegisterScreen navigation={navigation} />;
       case 'MainTabs':
       case 'ChatList':
-        return <ChatListScreen navigation={navigation} onRefresh={params?.refresh} />;
+        return <MainTabsScreen navigation={navigation} onRefresh={params?.refresh} />;
       case 'CreateGroup':
         return <CreateGroupScreen navigation={navigation} route={route} />;
       case 'InviteMembers':
