@@ -10,6 +10,10 @@ export type CommandType =
   | 'whisper'
   | 'read_latest'
   | 'read_unread'
+  | 'select_suggestion'
+  | 'summarize'
+  | 'start_ambient'
+  | 'stop_ambient'
   | 'unknown';
 
 export interface VoiceCommand {
@@ -121,6 +125,39 @@ const commandPatterns: CommandPattern[] = [
       /^(?:read\s+(?:all\s+)?messages?)$/i,
       /^(?:catch\s+me\s+up)$/i,
       /^(?:what\s+did\s+I\s+miss)$/i,
+    ],
+    extractPayload: () => '',
+  },
+  {
+    type: 'select_suggestion',
+    patterns: [
+      /^(?:option|suggestion|use\s+suggestion|pick\s+option|select)\s+(\d)$/i,
+      /^(?:number)\s+(\d)$/i,
+    ],
+    extractPayload: (match) => match[1],
+  },
+  {
+    type: 'summarize',
+    patterns: [
+      /^(?:summarize|summarise)\s+(?:the\s+)?(?:conversation|chat|discussion)$/i,
+      /^(?:give\s+me\s+a\s+summary)$/i,
+      /^(?:what'?s?\s+(?:the\s+)?(?:summary|recap|tldr))$/i,
+    ],
+    extractPayload: () => '',
+  },
+  {
+    type: 'start_ambient',
+    patterns: [
+      /^(?:start|begin|enable)\s+(?:ambient|background)\s+(?:conversation|listening|mode)$/i,
+      /^(?:ambient\s+mode\s+on)$/i,
+    ],
+    extractPayload: () => '',
+  },
+  {
+    type: 'stop_ambient',
+    patterns: [
+      /^(?:stop|end|disable)\s+(?:ambient|background)\s+(?:conversation|listening|mode)$/i,
+      /^(?:ambient\s+mode\s+off)$/i,
     ],
     extractPayload: () => '',
   },
@@ -273,8 +310,10 @@ export function getSuggestions(context: ScreenContext): string[] {
     case 'chat_room':
       return [
         '"Say [message]"',
+        '"Option 1" / "Option 2"',
+        '"Summarize conversation"',
+        '"Start ambient mode"',
         '"Read latest message"',
-        '"Read unread messages"',
         '"Whisper to [name] [message]"',
         '"Call"',
       ];

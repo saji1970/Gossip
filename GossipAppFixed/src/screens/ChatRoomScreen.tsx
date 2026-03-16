@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,14 @@ import { Group } from '../utils/GroupStorage';
 import { useApp } from '../context/AppContext';
 import { Colors, BorderRadius, Spacing } from '../constants/theme';
 import VoiceInputBar from '../components/voice/VoiceInputBar';
-import VoiceMessageBubble from '../components/voice/VoiceMessageBubble';
 import VoiceCommandOverlay from '../components/voice/VoiceCommandOverlay';
+import VoiceTimeline, { TimelineMessage } from '../components/voice/VoiceTimeline';
+import PredictiveSuggestions from '../components/voice/PredictiveSuggestions';
+import AIOrb, { OrbState } from '../components/voice/AIOrb';
+import GlassesHUD from '../components/voice/GlassesHUD';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 import { useTTS } from '../hooks/useTTS';
+import { useGlassesMode } from '../hooks/useGlassesMode';
 import * as LastReadService from '../services/LastReadService';
 import { WhisperMember } from '../components/voice/WhisperPicker';
 import * as api from '../services/api';
@@ -33,13 +37,13 @@ interface Message {
   content: string;
   timestamp: Date;
   isOwnMessage: boolean;
-  type: 'text' | 'voice';
+  type: 'text' | 'voice' | 'summary';
   audioUri?: string;
   audioDuration?: number;
   whisperTo?: string[];
+  personalityBadge?: string;
 }
 
-// Simple message storage - persists across the app
 const messagesByGroup = new Map<string, Message[]>();
 
 const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) => {
@@ -53,19 +57,24 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 
   const playback = useAudioPlayback();
   const tts = useTTS();
+  const { glassesMode, toggleGlassesMode } = useGlassesMode();
   const [voiceOverlayVisible, setVoiceOverlayVisible] = useState(false);
+
+  // AI state
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [orbState, setOrbState] = useState<OrbState>('idle');
+  const [activeSpeakerId, setActiveSpeakerId] = useState<string | undefined>();
+  const [ambientMode, setAmbientMode] = useState(false);
 
   useEffect(() => {
     if (groupId) {
       const currentGroup = getGroupById(groupId);
-      if (currentGroup) {
-        setGroup(currentGroup);
-      }
+      if (currentGroup) setGroup(currentGroup);
       loadMessages();
     }
   }, [groupId]);
 
-  // Update last-read timestamp when messages change
   useEffect(() => {
     if (groupId && messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
@@ -76,6 +85,39 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }
   }, [groupId, messages.length]);
 
+  // Fetch AI suggestions when a new non-own message arrives
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (!last.isOwnMessage && last.type !== 'summary') {
+      fetchSuggestions(last.content);
+    }
+  }, [messages.length]);
+
+  const fetchSuggestions = useCallback(async (text: string) => {
+    setSuggestionsLoading(true);
+    setOrbState('processing');
+    try {
+      const result = await api.getReplySuggestions(text, 'neutral', 'general', {}, 3);
+      setSuggestions(result);
+      setOrbState('responding');
+      // Auto-clear after 15s
+      setTimeout(() => {
+        setSuggestions(prev => prev === result ? [] : prev);
+        setOrbState(prev => prev === 'responding' ? 'idle' : prev);
+      }, 15000);
+    } catch {
+      // Fallback local suggestions
+      setSuggestions([
+        'Got it, thanks!',
+        'Tell me more',
+        'Interesting!',
+      ]);
+      setOrbState('idle');
+    }
+    setSuggestionsLoading(false);
+  }, []);
+
   const loadMessages = () => {
     if (groupId) {
       const groupMessages = messagesByGroup.get(groupId) || [];
@@ -83,46 +125,44 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }
   };
 
-  const handleSendMessage = (text: string) => {
-    if (!text.trim() || !groupId || sending) return;
+  const addMessage = useCallback((msg: Message) => {
+    if (!groupId) return;
+    const groupMessages = messagesByGroup.get(groupId) || [];
+    groupMessages.push(msg);
+    messagesByGroup.set(groupId, groupMessages);
+    setMessages([...groupMessages]);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+  }, [groupId]);
 
+  const handleSendMessage = useCallback((text: string) => {
+    if (!text.trim() || !groupId || sending) return;
     setSending(true);
 
-    setTimeout(() => {
-      const userEmail = user?.email || 'user@example.com';
-      const userName = user?.displayName || 'You';
-
-      const message: Message = {
-        id: Date.now().toString(),
-        senderId: userEmail,
-        senderName: userName,
-        content: text.trim(),
-        timestamp: new Date(),
-        isOwnMessage: true,
-        type: 'text',
-      };
-
-      const groupMessages = messagesByGroup.get(groupId) || [];
-      groupMessages.push(message);
-      messagesByGroup.set(groupId, groupMessages);
-
-      setMessages([...groupMessages]);
-      setSending(false);
-
-      // Also send to backend if available
-      api.sendMessage(groupId, userName, text.trim()).catch(() => {});
-
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    }, 300);
-  };
-
-  const handleSendVoiceMessage = (audioUri: string, durationMs: number, whisperTo?: string[]) => {
-    if (!groupId) return;
-
-    const userEmail = user?.email || 'user@example.com';
     const userName = user?.displayName || 'You';
+    const userEmail = user?.email || 'user@example.com';
+
+    const message: Message = {
+      id: Date.now().toString(),
+      senderId: userEmail,
+      senderName: userName,
+      content: text.trim(),
+      timestamp: new Date(),
+      isOwnMessage: true,
+      type: 'text',
+    };
+
+    addMessage(message);
+    setSending(false);
+    setSuggestions([]);
+    setOrbState('idle');
+
+    api.sendMessage(groupId, userName, text.trim()).catch(() => {});
+  }, [groupId, sending, user, addMessage]);
+
+  const handleSendVoiceMessage = useCallback((audioUri: string, durationMs: number, whisperTo?: string[]) => {
+    if (!groupId) return;
+    const userName = user?.displayName || 'You';
+    const userEmail = user?.email || 'user@example.com';
 
     const message: Message = {
       id: Date.now().toString(),
@@ -137,93 +177,94 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
       whisperTo: whisperTo && whisperTo.length > 0 ? whisperTo : undefined,
     };
 
-    const groupMessages = messagesByGroup.get(groupId) || [];
-    groupMessages.push(message);
-    messagesByGroup.set(groupId, groupMessages);
-
-    setMessages([...groupMessages]);
-
-    // Upload to backend if available
+    addMessage(message);
     api.sendVoiceMessage(groupId, audioUri, durationMs, userName, whisperTo).catch(() => {});
+  }, [groupId, user, addMessage]);
 
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  };
-
-  const handleDeleteMessage = (messageId: string) => {
-    Alert.alert(
-      'Delete message',
-      'Are you sure you want to delete this message?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            if (!groupId) return;
-            const groupMessages = messagesByGroup.get(groupId) || [];
-            const updated = groupMessages.filter(m => m.id !== messageId);
-            messagesByGroup.set(groupId, updated);
-            setMessages([...updated]);
-            // Best-effort backend delete
-            api.deleteMessage(messageId).catch(() => {});
-          },
+  const handleDeleteMessage = useCallback((messageId: string) => {
+    Alert.alert('Delete message', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: () => {
+          if (!groupId) return;
+          const updated = (messagesByGroup.get(groupId) || []).filter(m => m.id !== messageId);
+          messagesByGroup.set(groupId, updated);
+          setMessages([...updated]);
+          api.deleteMessage(messageId).catch(() => {});
         },
-      ],
-    );
-  };
+      },
+    ]);
+  }, [groupId]);
+
+  const handleSuggestionSelect = useCallback((text: string, _index: number) => {
+    handleSendMessage(text);
+  }, [handleSendMessage]);
+
+  const handleSummarize = useCallback(async () => {
+    if (!groupId) return;
+    setOrbState('processing');
+    try {
+      const result = await api.getConversationSummary(groupId);
+      const summaryMsg: Message = {
+        id: `summary-${Date.now()}`,
+        senderId: 'ai',
+        senderName: 'AI',
+        content: result.summary,
+        timestamp: new Date(),
+        isOwnMessage: false,
+        type: 'summary',
+      };
+      addMessage(summaryMsg);
+      setOrbState('responding');
+      setTimeout(() => setOrbState('idle'), 3000);
+    } catch {
+      Alert.alert('Error', 'Could not generate summary');
+      setOrbState('idle');
+    }
+  }, [groupId, addMessage]);
 
   const handleStartCall = (type: 'voice' | 'video') => {
     Alert.alert(
       `${type === 'voice' ? 'Voice' : 'Video'} Call`,
-      `Start a group ${type} call with all members?`,
+      `Start a group ${type} call?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Start Call',
-          onPress: () => {
-            if (navigation) {
-              navigation.navigate('GroupCall', { group, callType: type });
-            }
-          },
-        },
+        { text: 'Start Call', onPress: () => navigation?.navigate('GroupCall', { group, callType: type }) },
       ]
     );
   };
 
-  const formatMessageTime = (timestamp: Date) => {
-    const now = new Date();
-    const diff = now.getTime() - timestamp.getTime();
-
-    if (diff < 60000) return 'Just now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-
-    return timestamp.toLocaleDateString();
-  };
-
-  // Build whisper member list for the picker (approved members excluding self)
   const whisperMembers: WhisperMember[] = (group?.members || [])
     .filter(m => m.status === 'approved' && m.email !== user?.email)
     .map(m => ({ email: m.email }));
 
-  // Filter messages: hide whispers not addressed to current user
   const visibleMessages = messages.filter((msg) => {
     if (!msg.whisperTo || msg.whisperTo.length === 0) return true;
     const currentEmail = user?.email || '';
     return msg.isOwnMessage || msg.whisperTo.includes(currentEmail);
   });
 
+  // Convert to timeline messages
+  const timelineMessages: TimelineMessage[] = visibleMessages.map(m => ({
+    ...m,
+    isCurrentTrack: playback.currentUri === m.audioUri,
+    isPlaying: playback.isPlaying && playback.currentUri === m.audioUri,
+    progress: playback.currentUri === m.audioUri ? playback.progress : 0,
+  }));
+
+  // Filter to only text/voice messages for TTS (exclude 'summary')
+  const speakableMessages = visibleMessages.filter(m => m.type === 'text' || m.type === 'voice') as Array<{
+    senderName: string; content: string; isOwnMessage: boolean; type: 'text' | 'voice'; timestamp: Date;
+  }>;
+
   const handleVoiceCommand = (type: string, payload: string) => {
     switch (type) {
       case 'read_latest':
-        tts.speakLatest(visibleMessages);
+        tts.speakLatest(speakableMessages);
         break;
       case 'read_unread':
-        if (groupId) {
-          tts.speakUnread(groupId, visibleMessages);
-        }
+        if (groupId) tts.speakUnread(groupId, speakableMessages);
         break;
       case 'send_message':
         if (payload) handleSendMessage(payload);
@@ -231,118 +272,50 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
       case 'call_group':
         handleStartCall('voice');
         break;
+      case 'select_suggestion': {
+        const idx = parseInt(payload, 10) - 1;
+        if (idx >= 0 && idx < suggestions.length) {
+          handleSendMessage(suggestions[idx]);
+        }
+        break;
+      }
+      case 'summarize':
+        handleSummarize();
+        break;
+      case 'start_ambient':
+        setAmbientMode(true);
+        setOrbState('listening');
+        break;
+      case 'stop_ambient':
+        setAmbientMode(false);
+        setOrbState('idle');
+        break;
       default:
         break;
     }
   };
 
+  const handlePlayAudio = useCallback((uri: string, dur?: number) => {
+    playback.play(uri, dur);
+    // Set active speaker for aura
+    const msg = messages.find(m => m.audioUri === uri);
+    if (msg) {
+      setActiveSpeakerId(msg.senderId);
+      // Clear after playback duration
+      setTimeout(() => setActiveSpeakerId(undefined), (dur || 3000));
+    }
+  }, [playback, messages]);
+
   const handleReadAloudPress = () => {
     if (tts.isSpeaking) {
       tts.stop();
     } else {
-      tts.speakLatest(visibleMessages);
+      tts.speakLatest(speakableMessages);
     }
   };
 
-  const handleReadAloudLongPress = () => {
-    if (tts.isSpeaking) {
-      tts.stop();
-    } else if (groupId) {
-      tts.speakUnread(groupId, visibleMessages);
-    }
-  };
-
-  // Resolve whisperTo emails to display names
-  const getWhisperNames = (whisperTo?: string[]): string[] => {
-    if (!whisperTo) return [];
-    return whisperTo.map((email) => {
-      const member = group?.members?.find(m => m.email === email);
-      return member?.email.split('@')[0] || email;
-    });
-  };
-
-  const renderMessage = ({ item: message }: { item: Message }) => {
-    const avatarColors = ['#818CF8', '#34D399', '#FB923C', '#F87171', '#60A5FA', '#A78BFA', '#F472B6'];
-    const avatarColor = avatarColors[message.senderName.length % avatarColors.length];
-    const timeText = formatMessageTime(message.timestamp);
-
-    const Wrapper = message.isOwnMessage ? TouchableOpacity : View;
-    const wrapperProps = message.isOwnMessage
-      ? { onLongPress: () => handleDeleteMessage(message.id), activeOpacity: 0.7 }
-      : {};
-
-    return (
-      <Wrapper
-        style={[
-          styles.messageContainer,
-          message.isOwnMessage ? styles.ownMessage : styles.otherMessage,
-        ]}
-        {...wrapperProps}
-      >
-        {!message.isOwnMessage && (
-          <View style={styles.senderInfo}>
-            <View style={[styles.senderAvatar, { backgroundColor: avatarColor }]}>
-              <Text style={styles.avatarText}>{message.senderName.charAt(0).toUpperCase()}</Text>
-            </View>
-            <Text style={[styles.senderName, { color: avatarColor }]}>
-              ~ {message.senderName}
-            </Text>
-          </View>
-        )}
-
-        {message.type === 'voice' && message.audioUri ? (
-          <VoiceMessageBubble
-            audioUri={message.audioUri}
-            durationMs={message.audioDuration || 0}
-            isOwnMessage={message.isOwnMessage}
-            isWhisper={!!message.whisperTo && message.whisperTo.length > 0}
-            whisperToNames={getWhisperNames(message.whisperTo)}
-            isPlaying={playback.isPlaying}
-            isCurrentTrack={playback.currentUri === message.audioUri}
-            progress={playback.currentUri === message.audioUri ? playback.progress : 0}
-            onPlay={() => playback.play(message.audioUri!, message.audioDuration)}
-            timestamp={timeText}
-          />
-        ) : (
-          <View style={[
-            styles.messageBubble,
-            message.isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
-          ]}>
-            {message.whisperTo && message.whisperTo.length > 0 && (
-              <View style={styles.whisperLabel}>
-                <Text style={styles.whisperLabelText}>
-                  &#x1F512; Whisper to {getWhisperNames(message.whisperTo).join(', ')}
-                </Text>
-              </View>
-            )}
-            <Text style={[
-              styles.messageText,
-              message.isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
-            ]}>
-              {message.content}
-            </Text>
-
-            <Text style={[
-              styles.messageTime,
-              message.isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime,
-            ]}>
-              {timeText}
-            </Text>
-          </View>
-        )}
-      </Wrapper>
-    );
-  };
-
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyIcon}>&#x1F4AC;</Text>
-      <Text style={styles.emptyTitle}>No messages yet</Text>
-      <Text style={styles.emptyDescription}>
-        Send the first message to start the conversation
-      </Text>
-    </View>
-  );
+  // Last message for HUD
+  const lastVisible = visibleMessages[visibleMessages.length - 1];
 
   if (!group) {
     return (
@@ -354,105 +327,94 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 
   return (
     <View style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
+
         {/* Header */}
         <View style={styles.groupHeader}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.navigate('ChatList')}
-          >
-            <Text style={styles.backButtonText}>&#x2190;</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.navigate('ChatList')}>
+            <Text style={styles.backButtonText}>{'\u2190'}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.groupInfo}
-            onPress={() => setShowMembers(!showMembers)}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.groupInfo} onPress={() => setShowMembers(!showMembers)} activeOpacity={0.7}>
             <Text style={styles.groupName} numberOfLines={1}>{group.name}</Text>
-            <Text style={styles.groupMembers}>
-              {group.members?.filter(m => m.status === 'approved').length || 1} members {showMembers ? '\u25B2' : '\u25BC'}
-            </Text>
+            <View style={styles.groupSubRow}>
+              <Text style={styles.groupMembers}>
+                {group.members?.filter(m => m.status === 'approved').length || 1} members
+              </Text>
+              {ambientMode && (
+                <View style={styles.ambientBadge}>
+                  <View style={styles.ambientDot} />
+                  <Text style={styles.ambientText}>Ambient</Text>
+                </View>
+              )}
+            </View>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.headerButton}
-            onPress={handleReadAloudPress}
-            onLongPress={handleReadAloudLongPress}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.headerButtonIcon}>
-              {tts.isSpeaking ? '\u23F9' : '\u{1F50A}'}
-            </Text>
+          {/* AI Orb */}
+          <View style={styles.orbContainer}>
+            <AIOrb state={orbState} size={32} />
+          </View>
+
+          <TouchableOpacity style={styles.headerButton} onPress={handleReadAloudPress} activeOpacity={0.7}>
+            <Text style={styles.headerButtonIcon}>{tts.isSpeaking ? '\u23F9' : '\u{1F50A}'}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.headerButton}
-            onPress={() => setVoiceOverlayVisible(true)}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.headerButton} onPress={() => setVoiceOverlayVisible(true)} activeOpacity={0.7}>
             <Text style={styles.headerButtonIcon}>{'\u{1F3A4}'}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.callButton}
-            onPress={() => handleStartCall('voice')}
-          >
-            <Text style={styles.callIcon}>&#x1F4DE;</Text>
+          <TouchableOpacity style={styles.headerButton} onPress={toggleGlassesMode} activeOpacity={0.7}>
+            <Text style={[styles.headerButtonIcon, glassesMode && { color: Colors.primary }]}>
+              {'\u{1F453}'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.callButton} onPress={() => handleStartCall('voice')}>
+            <Text style={styles.callIcon}>{'\u{1F4DE}'}</Text>
           </TouchableOpacity>
         </View>
 
         {/* Members Panel */}
         {showMembers && group.members && (
           <View style={styles.membersPanel}>
-            {group.members
-              .filter(m => m.status === 'approved')
-              .map((member) => {
-                const isCurrentUser = member.email === user?.email;
-                const roleColors: Record<string, string> = {
-                  admin: '#F59E0B',
-                  approver: '#818CF8',
-                  member: Colors.textMuted,
-                };
-                return (
-                  <View key={member.email} style={styles.memberRow}>
-                    <View style={[styles.memberAvatar, isCurrentUser && { backgroundColor: Colors.accent }]}>
-                      <Text style={styles.memberAvatarText}>
-                        {member.email.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.memberDetails}>
-                      <Text style={styles.memberEmail} numberOfLines={1}>
-                        {member.email}{isCurrentUser ? ' (You)' : ''}
-                      </Text>
-                    </View>
-                    <View style={[styles.roleBadge, { backgroundColor: roleColors[member.role] || Colors.textMuted }]}>
-                      <Text style={styles.roleBadgeText}>{member.role}</Text>
-                    </View>
+            {group.members.filter(m => m.status === 'approved').map((member) => {
+              const isCurrentUser = member.email === user?.email;
+              const roleColors: Record<string, string> = { admin: '#F59E0B', approver: '#818CF8', member: Colors.textMuted };
+              return (
+                <View key={member.email} style={styles.memberRow}>
+                  <View style={[styles.memberAvatar, isCurrentUser && { backgroundColor: Colors.accent }]}>
+                    <Text style={styles.memberAvatarText}>{member.email.charAt(0).toUpperCase()}</Text>
                   </View>
-                );
-              })}
-            {group.members.filter(m => m.status === 'pending').length > 0 && (
-              <Text style={styles.pendingNote}>
-                + {group.members.filter(m => m.status === 'pending').length} pending approval
-              </Text>
-            )}
+                  <View style={styles.memberDetails}>
+                    <Text style={styles.memberEmail} numberOfLines={1}>
+                      {member.email}{isCurrentUser ? ' (You)' : ''}
+                    </Text>
+                  </View>
+                  <View style={[styles.roleBadge, { backgroundColor: roleColors[member.role] || Colors.textMuted }]}>
+                    <Text style={styles.roleBadgeText}>{member.role}</Text>
+                  </View>
+                </View>
+              );
+            })}
           </View>
         )}
 
-        {/* Messages */}
-        <FlatList
-          ref={flatListRef}
-          data={visibleMessages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          style={styles.messagesList}
-          contentContainerStyle={styles.messagesContent}
-          ListEmptyComponent={renderEmptyState}
-          showsVerticalScrollIndicator={false}
+        {/* Voice Timeline */}
+        <VoiceTimeline
+          messages={timelineMessages}
+          activeSpeakerId={activeSpeakerId}
+          onPlayAudio={handlePlayAudio}
+          onDeleteMessage={handleDeleteMessage}
+          glassesMode={glassesMode}
+          flatListRef={flatListRef}
+        />
+
+        {/* Predictive Suggestions */}
+        <PredictiveSuggestions
+          suggestions={suggestions}
+          onSelect={handleSuggestionSelect}
+          visible={suggestions.length > 0 || suggestionsLoading}
+          loading={suggestionsLoading}
         />
 
         {/* Voice Input Bar */}
@@ -465,11 +427,22 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         />
       </KeyboardAvoidingView>
 
+      {/* Voice Command Overlay */}
       <VoiceCommandOverlay
         visible={voiceOverlayVisible}
         onDismiss={() => setVoiceOverlayVisible(false)}
         onCommand={handleVoiceCommand}
         context="chat_room"
+      />
+
+      {/* Glasses HUD Overlay */}
+      <GlassesHUD
+        activeSpeaker={activeSpeakerId ? messages.find(m => m.senderId === activeSpeakerId)?.senderName : undefined}
+        lastMessage={lastVisible?.type === 'voice' ? '[Voice]' : lastVisible?.content}
+        lastSender={lastVisible?.isOwnMessage ? undefined : lastVisible?.senderName}
+        aiSuggestion={suggestions[0]}
+        voiceState={orbState}
+        visible={glassesMode}
       />
     </View>
   );
@@ -483,67 +456,92 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
-  // Header
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.sm,
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
     paddingTop: 50,
   },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.sm,
   },
   backButtonText: {
     color: Colors.textPrimary,
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '600',
   },
   groupInfo: {
     flex: 1,
+    marginLeft: Spacing.xs,
   },
   groupName: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '700',
     color: Colors.textPrimary,
-    marginBottom: 2,
+  },
+  groupSubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
   groupMembers: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textMuted,
   },
+  ambientBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${Colors.voiceListening}20`,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  ambientDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.voiceListening,
+    marginRight: 4,
+  },
+  ambientText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.voiceListening,
+  },
+  orbContainer: {
+    marginRight: Spacing.xs,
+  },
   headerButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+  },
+  headerButtonIcon: {
+    fontSize: 16,
+  },
+  callButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.xs,
-  },
-  headerButtonIcon: {
-    fontSize: 18,
-  },
-  callButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   callIcon: {
-    fontSize: 22,
+    fontSize: 18,
   },
-  // Members panel
   membersPanel: {
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
@@ -557,9 +555,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   memberAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -567,140 +565,26 @@ const styles = StyleSheet.create({
   },
   memberAvatarText: {
     color: Colors.white,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   memberDetails: {
     flex: 1,
   },
   memberEmail: {
-    fontSize: 16,
+    fontSize: 15,
     color: Colors.textPrimary,
   },
   roleBadge: {
     paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
+    paddingVertical: 2,
     borderRadius: BorderRadius.sm,
   },
   roleBadgeText: {
     color: Colors.white,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     textTransform: 'capitalize',
-  },
-  pendingNote: {
-    fontSize: 14,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-    paddingVertical: Spacing.sm,
-    textAlign: 'center',
-  },
-  // Messages
-  messagesList: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  messagesContent: {
-    padding: Spacing.lg,
-    flexGrow: 1,
-  },
-  messageContainer: {
-    marginBottom: Spacing.lg,
-    maxWidth: '85%',
-  },
-  ownMessage: {
-    alignSelf: 'flex-end',
-  },
-  otherMessage: {
-    alignSelf: 'flex-start',
-  },
-  senderInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  senderAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.sm,
-  },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.white,
-  },
-  senderName: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  messageBubble: {
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: BorderRadius.xxl,
-  },
-  ownMessageBubble: {
-    backgroundColor: Colors.ownBubble,
-    borderBottomRightRadius: 6,
-  },
-  otherMessageBubble: {
-    backgroundColor: Colors.otherBubble,
-    borderBottomLeftRadius: 6,
-  },
-  whisperLabel: {
-    marginBottom: Spacing.xs,
-  },
-  whisperLabelText: {
-    fontSize: 12,
-    color: Colors.warning,
-    fontWeight: '600',
-  },
-  messageText: {
-    fontSize: 20,
-    lineHeight: 28,
-  },
-  ownMessageText: {
-    color: Colors.ownBubbleText,
-  },
-  otherMessageText: {
-    color: Colors.otherBubbleText,
-  },
-  messageTime: {
-    fontSize: 12,
-    marginTop: 4,
-    alignSelf: 'flex-end',
-  },
-  ownMessageTime: {
-    color: Colors.textMuted,
-  },
-  otherMessageTime: {
-    color: Colors.textMuted,
-  },
-  // Empty state
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: Spacing.lg,
-  },
-  emptyTitle: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.sm,
-  },
-  emptyDescription: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-    lineHeight: 24,
   },
 });
 

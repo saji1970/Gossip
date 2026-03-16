@@ -8,6 +8,11 @@ const POLL_INTERVAL_MS = 30000;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let lastNotifiedTs: Map<string, number> = new Map();
 let notificationsEnabled = true;
+let glassesMode = false;
+
+export function setGlassesMode(enabled: boolean): void {
+  glassesMode = enabled;
+}
 
 async function ensureChannel(): Promise<void> {
   await notifee.createChannel({
@@ -38,9 +43,18 @@ async function checkGroupForNewMessages(
 
     // Show notification for the latest new message
     const latest = newMessages[newMessages.length - 1];
-    const body = latest.messageType === 'voice'
-      ? `${latest.senderName}: [Voice message]`
-      : `${latest.senderName}: ${latest.content}`;
+    let body: string;
+    if (glassesMode) {
+      // Short format for smart glasses
+      const shortName = latest.senderName.split(' ')[0];
+      body = latest.messageType === 'voice'
+        ? `${shortName}: voice msg`
+        : `${shortName}: ${latest.content.slice(0, 40)}`;
+    } else {
+      body = latest.messageType === 'voice'
+        ? `${latest.senderName}: [Voice message]`
+        : `${latest.senderName}: ${latest.content}`;
+    }
 
     await notifee.displayNotification({
       title: groupName,

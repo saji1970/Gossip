@@ -415,6 +415,16 @@ export async function getReplySuggestions(
   return res.suggestions;
 }
 
+export async function getConversationSummary(
+  groupId: string,
+  messageCount: number = 50,
+): Promise<{ summary: string }> {
+  return request<{ summary: string }>('/conversation/summary', {
+    method: 'POST',
+    body: JSON.stringify({ groupId, messageCount }),
+  }, true);
+}
+
 export async function healthCheck(): Promise<boolean> {
   try {
     await request<{ status: string }>('/health');

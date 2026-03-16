@@ -180,6 +180,11 @@ class ReplySuggestionsRequest(BaseModel):
     count: int = 5
 
 
+class ConversationSummaryRequest(BaseModel):
+    groupId: str
+    messageCount: int = 50
+
+
 class AnalysisResponse(BaseModel):
     speaker: str
     transcript: str
@@ -695,6 +700,71 @@ async def reply_suggestions(req: ReplySuggestionsRequest):
         count=req.count,
     )
     return {"suggestions": suggestions}
+
+
+@app.post("/conversation/summary")
+async def conversation_summary(
+    req: ConversationSummaryRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Generate a summary of recent messages in a group."""
+    messages = await group_service.get_messages(
+        session, req.groupId, user["uid"], limit=req.messageCount
+    )
+
+    if not messages:
+        return {"summary": "No messages to summarize."}
+
+    # Build text block from messages
+    lines = []
+    for msg in messages:
+        sender = msg.get("senderName", "Unknown")
+        content = msg.get("content", "")
+        if msg.get("messageType") == "voice":
+            content = "[voice message]"
+        lines.append(f"{sender}: {content}")
+
+    conversation_text = "\n".join(lines)
+
+    # Try AI summarization via reply_service (Ollama), fall back to simple extraction
+    try:
+        from backend.services.reply_service import generate_reply_suggestions
+
+        prompt_text = (
+            f"Summarize this group conversation in 2-3 concise sentences. "
+            f"Focus on key topics, decisions, and action items:\n\n{conversation_text}"
+        )
+        results = await generate_reply_suggestions(
+            text=prompt_text,
+            emotion="neutral",
+            topic="summary",
+            speaker_traits={},
+            count=1,
+        )
+        summary = results[0] if results else _simple_summary(lines)
+    except Exception:
+        summary = _simple_summary(lines)
+
+    return {"summary": summary}
+
+
+def _simple_summary(lines: list[str]) -> str:
+    """Fallback summary when AI is unavailable."""
+    total = len(lines)
+    speakers = set()
+    for line in lines:
+        colon_idx = line.find(":")
+        if colon_idx > 0:
+            speakers.add(line[:colon_idx].strip())
+
+    speaker_list = ", ".join(sorted(speakers)[:5])
+    result = f"{total} messages from {speaker_list}."
+
+    if total > 3:
+        result += f" Last message: {lines[-1]}"
+
+    return result
 
 
 if __name__ == "__main__":
