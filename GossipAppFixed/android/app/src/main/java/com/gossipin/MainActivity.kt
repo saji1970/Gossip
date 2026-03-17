@@ -26,7 +26,7 @@ class MainActivity : ReactActivity() {
   }
 
   override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
       emitKeyEvent("hardwareKeyDown", keyCode)
       return true // consume the event so volume doesn't change
     }
@@ -34,7 +34,7 @@ class MainActivity : ReactActivity() {
   }
 
   override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+    if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
       emitKeyEvent("hardwareKeyUp", keyCode)
       return true
     }

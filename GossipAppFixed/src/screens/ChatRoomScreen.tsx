@@ -12,12 +12,15 @@ import {
 import { Group } from '../utils/GroupStorage';
 import { useApp } from '../context/AppContext';
 import { Colors, BorderRadius, Spacing } from '../constants/theme';
-import VoiceInputBar from '../components/voice/VoiceInputBar';
+import VoiceInputBar, { VoiceInputBarRef } from '../components/voice/VoiceInputBar';
 import VoiceCommandOverlay from '../components/voice/VoiceCommandOverlay';
+import { useVolumeButtons } from '../hooks/useVolumeButtons';
 import VoiceTimeline, { TimelineMessage } from '../components/voice/VoiceTimeline';
 import PredictiveSuggestions from '../components/voice/PredictiveSuggestions';
 import AIOrb, { OrbState } from '../components/voice/AIOrb';
 import GlassesHUD from '../components/voice/GlassesHUD';
+import GlassCard from '../components/futuristic/GlassCard';
+import GlowingIconButton from '../components/futuristic/GlowingIconButton';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 import { useTTS } from '../hooks/useTTS';
 import { useGlassesMode } from '../hooks/useGlassesMode';
@@ -59,6 +62,27 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
   const tts = useTTS();
   const { glassesMode, toggleGlassesMode } = useGlassesMode();
   const [voiceOverlayVisible, setVoiceOverlayVisible] = useState(false);
+  const voiceInputRef = useRef<VoiceInputBarRef>(null);
+
+  // ── Volume button handlers ──
+  const handleVolDownLongPress = useCallback(() => {
+    setVoiceOverlayVisible(prev => !prev);
+  }, []);
+
+  const handleVolUpLongPress = useCallback(async () => {
+    if (!voiceInputRef.current) return;
+    if (voiceInputRef.current.getIsRecording()) {
+      await voiceInputRef.current.triggerStopAndSend();
+    } else {
+      await voiceInputRef.current.triggerStartRecording();
+    }
+  }, []);
+
+  useVolumeButtons({
+    onVolumeDownLongPress: handleVolDownLongPress,
+    onVolumeUpLongPress: handleVolUpLongPress,
+    enabled: true,
+  });
 
   // AI state
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -101,13 +125,11 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
       const result = await api.getReplySuggestions(text, 'neutral', 'general', {}, 3);
       setSuggestions(result);
       setOrbState('responding');
-      // Auto-clear after 15s
       setTimeout(() => {
         setSuggestions(prev => prev === result ? [] : prev);
         setOrbState(prev => prev === 'responding' ? 'idle' : prev);
       }, 15000);
     } catch {
-      // Fallback local suggestions
       setSuggestions([
         'Got it, thanks!',
         'Tell me more',
@@ -297,11 +319,9 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 
   const handlePlayAudio = useCallback((uri: string, dur?: number) => {
     playback.play(uri, dur);
-    // Set active speaker for aura
     const msg = messages.find(m => m.audioUri === uri);
     if (msg) {
       setActiveSpeakerId(msg.senderId);
-      // Clear after playback duration
       setTimeout(() => setActiveSpeakerId(undefined), (dur || 3000));
     }
   }, [playback, messages]);
@@ -314,13 +334,12 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }
   };
 
-  // Last message for HUD
   const lastVisible = visibleMessages[visibleMessages.length - 1];
 
   if (!group) {
     return (
       <View style={styles.container}>
-        <Text style={{ color: Colors.textPrimary }}>No group selected</Text>
+        <Text style={styles.noGroupText}>No group selected</Text>
       </View>
     );
   }
@@ -329,7 +348,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     <View style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
 
-        {/* Header */}
+        {/* Glassmorphism Header */}
         <View style={styles.groupHeader}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.navigate('ChatList')}>
             <Text style={styles.backButtonText}>{'\u2190'}</Text>
@@ -355,34 +374,39 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
             <AIOrb state={orbState} size={32} />
           </View>
 
-          <TouchableOpacity style={styles.headerButton} onPress={handleReadAloudPress} activeOpacity={0.7}>
-            <Text style={styles.headerButtonIcon}>{tts.isSpeaking ? '\u23F9' : '\u{1F50A}'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.headerButton} onPress={() => setVoiceOverlayVisible(true)} activeOpacity={0.7}>
-            <Text style={styles.headerButtonIcon}>{'\u{1F3A4}'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.headerButton} onPress={toggleGlassesMode} activeOpacity={0.7}>
-            <Text style={[styles.headerButtonIcon, glassesMode && { color: Colors.primary }]}>
-              {'\u{1F453}'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.callButton} onPress={() => handleStartCall('voice')}>
-            <Text style={styles.callIcon}>{'\u{1F4DE}'}</Text>
-          </TouchableOpacity>
+          <GlowingIconButton
+            icon={tts.isSpeaking ? '\u23F9' : '\u{1F50A}'}
+            onPress={handleReadAloudPress}
+            size={34}
+          />
+          <GlowingIconButton
+            icon={'\u{1F3A4}'}
+            onPress={() => setVoiceOverlayVisible(true)}
+            size={34}
+          />
+          <GlowingIconButton
+            icon={'\u{1F453}'}
+            onPress={toggleGlassesMode}
+            size={34}
+            active={glassesMode}
+            glowColor="rgba(129, 140, 248, 0.4)"
+          />
+          <GlowingIconButton
+            icon={'\u{1F4DE}'}
+            onPress={() => handleStartCall('voice')}
+            size={34}
+          />
         </View>
 
         {/* Members Panel */}
         {showMembers && group.members && (
-          <View style={styles.membersPanel}>
+          <GlassCard style={styles.membersPanel} intensity="high">
             {group.members.filter(m => m.status === 'approved').map((member) => {
               const isCurrentUser = member.email === user?.email;
-              const roleColors: Record<string, string> = { admin: '#F59E0B', approver: '#818CF8', member: Colors.textMuted };
+              const roleColors: Record<string, string> = { admin: '#F59E0B', approver: '#818CF8', member: 'rgba(148, 163, 184, 0.5)' };
               return (
                 <View key={member.email} style={styles.memberRow}>
-                  <View style={[styles.memberAvatar, isCurrentUser && { backgroundColor: Colors.accent }]}>
+                  <View style={[styles.memberAvatar, { borderColor: isCurrentUser ? '#34D399' : '#818CF8' }]}>
                     <Text style={styles.memberAvatarText}>{member.email.charAt(0).toUpperCase()}</Text>
                   </View>
                   <View style={styles.memberDetails}>
@@ -390,13 +414,13 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
                       {member.email}{isCurrentUser ? ' (You)' : ''}
                     </Text>
                   </View>
-                  <View style={[styles.roleBadge, { backgroundColor: roleColors[member.role] || Colors.textMuted }]}>
-                    <Text style={styles.roleBadgeText}>{member.role}</Text>
+                  <View style={[styles.roleBadge, { backgroundColor: `${roleColors[member.role] || 'rgba(148,163,184,0.5)'}30` }]}>
+                    <Text style={[styles.roleBadgeText, { color: roleColors[member.role] || '#94A3B8' }]}>{member.role}</Text>
                   </View>
                 </View>
               );
             })}
-          </View>
+          </GlassCard>
         )}
 
         {/* Voice Timeline */}
@@ -419,6 +443,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 
         {/* Voice Input Bar */}
         <VoiceInputBar
+          ref={voiceInputRef}
           onSendMessage={handleSendMessage}
           onSendVoiceMessage={handleSendVoiceMessage}
           disabled={sending}
@@ -451,55 +476,64 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#020617',
   },
   keyboardView: {
     flex: 1,
   },
+  noGroupText: {
+    color: '#F1F5F9',
+    textAlign: 'center',
+    marginTop: 100,
+    fontSize: 16,
+  },
+  // ── Glassmorphism Header ──
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.sm,
-    backgroundColor: Colors.background,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    backgroundColor: 'rgba(2, 6, 23, 0.75)',
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: 'rgba(148, 163, 184, 0.08)',
     paddingTop: 50,
+    gap: 4,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   backButtonText: {
-    color: Colors.textPrimary,
-    fontSize: 22,
+    color: '#F1F5F9',
+    fontSize: 20,
     fontWeight: '600',
   },
   groupInfo: {
     flex: 1,
-    marginLeft: Spacing.xs,
+    marginLeft: 6,
   },
   groupName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.textPrimary,
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#F1F5F9',
   },
   groupSubRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    gap: 8,
   },
   groupMembers: {
-    fontSize: 13,
-    color: Colors.textMuted,
+    fontSize: 12,
+    color: 'rgba(148, 163, 184, 0.5)',
   },
   ambientBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: `${Colors.voiceListening}20`,
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 8,
@@ -508,63 +542,40 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Colors.voiceListening,
+    backgroundColor: '#34D399',
     marginRight: 4,
   },
   ambientText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
-    color: Colors.voiceListening,
+    color: '#34D399',
   },
   orbContainer: {
-    marginRight: Spacing.xs,
+    marginRight: 2,
   },
-  headerButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 4,
-  },
-  headerButtonIcon: {
-    fontSize: 16,
-  },
-  callButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  callIcon: {
-    fontSize: 18,
-  },
+  // ── Members Panel ──
   membersPanel: {
-    backgroundColor: Colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
+    marginHorizontal: 12,
+    marginTop: 8,
+    borderRadius: 16,
   },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Spacing.sm,
+    paddingVertical: 8,
   },
   memberAvatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.primary,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Spacing.md,
+    marginRight: 10,
   },
   memberAvatarText: {
-    color: Colors.white,
+    color: '#F1F5F9',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -572,16 +583,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   memberEmail: {
-    fontSize: 15,
-    color: Colors.textPrimary,
+    fontSize: 14,
+    color: '#F1F5F9',
   },
   roleBadge: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
   },
   roleBadgeText: {
-    color: Colors.white,
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'capitalize',

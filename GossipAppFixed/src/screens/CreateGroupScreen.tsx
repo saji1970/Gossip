@@ -17,7 +17,11 @@ import Voice, {
 } from '@react-native-voice/voice';
 import { useApp } from '../context/AppContext';
 import { Group } from '../utils/GroupStorage';
-import { Colors, BorderRadius, Spacing } from '../constants/theme';
+import { Colors, Spacing } from '../constants/theme';
+import StarFieldBackground from '../components/futuristic/StarFieldBackground';
+import GlassCard from '../components/futuristic/GlassCard';
+import GlowingMicOrb from '../components/futuristic/GlowingMicOrb';
+import GlowingIconButton from '../components/futuristic/GlowingIconButton';
 
 interface CreateGroupScreenProps {
   navigation?: any;
@@ -36,23 +40,6 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route
   const [loading, setLoading] = useState(false);
 
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
-  // Pulse animation while listening
-  useEffect(() => {
-    if (voiceState === 'listening') {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.4, duration: 600, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-        ]),
-      );
-      loop.start();
-      return () => loop.stop();
-    } else {
-      pulseAnim.setValue(1);
-    }
-  }, [voiceState]);
 
   // Wire up Voice callbacks
   useEffect(() => {
@@ -105,7 +92,6 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route
       return;
     }
 
-    // Check for duplicate group name locally
     const duplicate = groups.some(
       g => g.name.toLowerCase() === trimmedName.toLowerCase(),
     );
@@ -165,356 +151,342 @@ const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route
     }
   };
 
-  return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleCancel} style={styles.backTouchable}>
-            <Text style={styles.backButton}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create Group</Text>
-          <View style={{ width: 60 }} />
-        </View>
+  const orbState = voiceState === 'listening'
+    ? 'listening'
+    : voiceState === 'processing'
+      ? 'processing'
+      : 'idle';
 
-        {/* Form */}
-        <View style={styles.form}>
-          {/* Voice input for group name */}
+  return (
+    <StarFieldBackground starCount={20} showRadialGlow={false}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={handleCancel} style={styles.backTouchable}>
+              <GlowingIconButton icon={'\u2190'} size={38} onPress={handleCancel} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Create Group</Text>
+            <View style={{ width: 38 }} />
+          </View>
+
+          {/* Voice input section */}
           <View style={styles.voiceSection}>
             <Text style={styles.voiceHint}>
               {voiceState === 'listening' ? 'Listening...' : 'Tap to say the group name'}
             </Text>
-            <Animated.View style={{ transform: [{ scale: voiceState === 'listening' ? pulseAnim : 1 }] }}>
-              <TouchableOpacity
-                style={[
-                  styles.voiceMicButton,
-                  voiceState === 'listening' && styles.voiceMicListening,
-                  voiceState === 'error' && styles.voiceMicError,
-                ]}
-                onPress={handleVoicePress}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.voiceMicIcon}>
-                  {voiceState === 'listening' ? '\u{1F3D9}' : '\u{1F3A4}'}
-                </Text>
-              </TouchableOpacity>
-            </Animated.View>
-          </View>
-
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Group Name *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter group name"
-              placeholderTextColor={Colors.textMuted}
-              value={groupName}
-              onChangeText={setGroupName}
-              autoCapitalize="words"
-              maxLength={50}
+            <GlowingMicOrb
+              state={orbState}
+              size={80}
+              onPress={handleVoicePress}
             />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Description (Optional)</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="What's this group about?"
-              placeholderTextColor={Colors.textMuted}
-              value={groupDescription}
-              onChangeText={setGroupDescription}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-              maxLength={200}
-            />
-          </View>
-
-          {/* Privacy Selection */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Group Privacy</Text>
-            <View style={styles.privacyContainer}>
-              <TouchableOpacity
-                style={[styles.privacyButton, privacy === 'public' && styles.privacyButtonActive]}
-                onPress={() => setPrivacy('public')}
-              >
-                <Text style={styles.privacyIcon}>🌐</Text>
-                <Text style={[styles.privacyText, privacy === 'public' && styles.privacyTextActive]}>
-                  Public
-                </Text>
-                <Text style={styles.privacyDescription}>Anyone can join</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.privacyButton, privacy === 'private' && styles.privacyButtonActive]}
-                onPress={() => setPrivacy('private')}
-              >
-                <Text style={styles.privacyIcon}>🔒</Text>
-                <Text style={[styles.privacyText, privacy === 'private' && styles.privacyTextActive]}>
-                  Private
-                </Text>
-                <Text style={styles.privacyDescription}>Invite only</Text>
-              </TouchableOpacity>
+          {/* Form */}
+          <GlassCard style={styles.formCard} intensity="medium">
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Group Name *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter group name"
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={groupName}
+                onChangeText={setGroupName}
+                autoCapitalize="words"
+                maxLength={50}
+              />
             </View>
-          </View>
 
-          {/* Terms and Conditions */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Terms & Conditions (Optional)</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              placeholder="Add rules or terms for joining this group..."
-              placeholderTextColor={Colors.textMuted}
-              value={termsAndConditions}
-              onChangeText={setTermsAndConditions}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-              maxLength={500}
-            />
-            <Text style={styles.helperText}>
-              New members will see agree/disagree before joining
-            </Text>
-          </View>
-
-          {/* Approval Requirement */}
-          <TouchableOpacity
-            style={styles.checkboxContainer}
-            onPress={() => setRequireApproval(!requireApproval)}
-          >
-            <View style={[styles.checkbox, requireApproval && styles.checkboxChecked]}>
-              {requireApproval && <Text style={styles.checkboxIcon}>✓</Text>}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Description (Optional)</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="What's this group about?"
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={groupDescription}
+                onChangeText={setGroupDescription}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                maxLength={200}
+              />
             </View>
-            <View style={styles.checkboxLabelContainer}>
-              <Text style={styles.checkboxLabel}>Require approval for new members</Text>
-              <Text style={styles.checkboxDescription}>
-                Admins/approvers must approve before members can join
+
+            {/* Privacy Selection */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Group Privacy</Text>
+              <View style={styles.privacyContainer}>
+                <TouchableOpacity
+                  style={[styles.privacyButton, privacy === 'public' && styles.privacyButtonActive]}
+                  onPress={() => setPrivacy('public')}
+                >
+                  <Text style={styles.privacyIcon}>{'\u{1F310}'}</Text>
+                  <Text style={[styles.privacyText, privacy === 'public' && styles.privacyTextActive]}>
+                    Public
+                  </Text>
+                  <Text style={styles.privacyDescription}>Anyone can join</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.privacyButton, privacy === 'private' && styles.privacyButtonActive]}
+                  onPress={() => setPrivacy('private')}
+                >
+                  <Text style={styles.privacyIcon}>{'\u{1F512}'}</Text>
+                  <Text style={[styles.privacyText, privacy === 'private' && styles.privacyTextActive]}>
+                    Private
+                  </Text>
+                  <Text style={styles.privacyDescription}>Invite only</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Terms and Conditions */}
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Terms & Conditions (Optional)</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Add rules or terms for joining..."
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={termsAndConditions}
+                onChangeText={setTermsAndConditions}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                maxLength={500}
+              />
+              <Text style={styles.helperText}>
+                New members will see agree/disagree before joining
               </Text>
             </View>
-          </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.createButton, loading && styles.disabledButton]}
-            onPress={handleCreateGroup}
-            disabled={loading}
-          >
-            <Text style={styles.createButtonText}>
-              {loading ? 'Creating...' : 'Create Group'}
-            </Text>
-          </TouchableOpacity>
+            {/* Approval Requirement */}
+            <TouchableOpacity
+              style={styles.checkboxContainer}
+              onPress={() => setRequireApproval(!requireApproval)}
+            >
+              <View style={[styles.checkbox, requireApproval && styles.checkboxChecked]}>
+                {requireApproval && <Text style={styles.checkboxIcon}>{'\u2713'}</Text>}
+              </View>
+              <View style={styles.checkboxLabelContainer}>
+                <Text style={styles.checkboxLabel}>Require approval for new members</Text>
+                <Text style={styles.checkboxDescription}>
+                  Admins/approvers must approve before members can join
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </GlassCard>
 
-          <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          {/* Action buttons */}
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={[styles.createButton, loading && styles.disabledButton]}
+              onPress={handleCreateGroup}
+              disabled={loading}
+            >
+              <Text style={styles.createButtonText}>
+                {loading ? 'Creating...' : 'Create Group'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </StarFieldBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scrollContainer: {
     flexGrow: 1,
+    paddingBottom: 40,
   },
+  // ── Header ──
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xl,
-    paddingTop: 50,
-    paddingBottom: Spacing.xl,
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingHorizontal: 20,
+    paddingTop: 52,
+    paddingBottom: 16,
   },
   backTouchable: {
-    paddingVertical: Spacing.sm,
-  },
-  backButton: {
-    color: Colors.textPrimary,
-    fontSize: 18,
-    fontWeight: '600',
+    // wrapper for GlowingIconButton
   },
   headerTitle: {
     fontSize: 22,
-    fontWeight: 'bold',
-    color: Colors.textPrimary,
+    fontWeight: '600',
+    color: '#F1F5F9',
+    letterSpacing: 0.5,
   },
-  form: {
-    padding: Spacing.xl,
-  },
-  // Voice section
+  // ── Voice section ──
   voiceSection: {
     alignItems: 'center',
-    marginBottom: Spacing.xxl,
-    paddingVertical: Spacing.lg,
+    marginBottom: 20,
+    paddingVertical: 16,
   },
   voiceHint: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.md,
+    fontSize: 15,
+    color: 'rgba(226, 232, 240, 0.5)',
+    marginBottom: 16,
+    letterSpacing: 0.5,
   },
-  voiceMicButton: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: Colors.voiceIdle,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-  },
-  voiceMicListening: {
-    backgroundColor: Colors.primary,
-  },
-  voiceMicError: {
-    backgroundColor: Colors.danger,
-  },
-  voiceMicIcon: {
-    fontSize: 32,
+  // ── Form Card ──
+  formCard: {
+    marginHorizontal: 16,
+    padding: 20,
   },
   inputContainer: {
-    marginBottom: Spacing.xl,
+    marginBottom: 18,
   },
   label: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '600',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.sm,
+    color: 'rgba(226, 232, 240, 0.7)',
+    marginBottom: 8,
+    letterSpacing: 0.5,
   },
   input: {
     borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 16,
-    fontSize: 18,
-    color: Colors.textPrimary,
-    backgroundColor: Colors.surface,
+    borderColor: 'rgba(148, 163, 184, 0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#F1F5F9',
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
   },
   textArea: {
-    height: 100,
-    paddingTop: 16,
+    height: 90,
+    paddingTop: 14,
   },
   helperText: {
-    fontSize: 14,
-    color: Colors.textMuted,
-    marginTop: Spacing.xs,
+    fontSize: 12,
+    color: 'rgba(148, 163, 184, 0.4)',
+    marginTop: 4,
     fontStyle: 'italic',
   },
+  // ── Privacy ──
   privacyContainer: {
     flexDirection: 'row',
-    gap: Spacing.md,
+    gap: 12,
   },
   privacyButton: {
     flex: 1,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.xl,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.15)',
+    borderRadius: 16,
+    padding: 16,
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    minHeight: 110,
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
+    minHeight: 100,
   },
   privacyButtonActive: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.surfaceLight,
+    borderColor: 'rgba(129, 140, 248, 0.4)',
+    backgroundColor: 'rgba(129, 140, 248, 0.1)',
   },
   privacyIcon: {
-    fontSize: 32,
-    marginBottom: Spacing.sm,
+    fontSize: 28,
+    marginBottom: 6,
   },
   privacyText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.xs,
+    color: 'rgba(226, 232, 240, 0.7)',
+    marginBottom: 2,
   },
   privacyTextActive: {
-    color: Colors.primary,
+    color: '#818CF8',
   },
   privacyDescription: {
-    fontSize: 14,
-    color: Colors.textMuted,
+    fontSize: 12,
+    color: 'rgba(148, 163, 184, 0.4)',
   },
+  // ── Checkbox ──
   checkboxContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: Spacing.xl,
-    padding: Spacing.lg,
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.md,
+    padding: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.4)',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(148, 163, 184, 0.1)',
   },
   checkbox: {
-    width: 28,
-    height: 28,
-    borderWidth: 2,
-    borderColor: Colors.border,
+    width: 24,
+    height: 24,
+    borderWidth: 1.5,
+    borderColor: 'rgba(148, 163, 184, 0.3)',
     borderRadius: 6,
-    marginRight: Spacing.md,
+    marginRight: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxChecked: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+    backgroundColor: 'rgba(129, 140, 248, 0.3)',
+    borderColor: '#818CF8',
   },
   checkboxIcon: {
-    color: Colors.white,
-    fontSize: 16,
+    color: '#818CF8',
+    fontSize: 14,
     fontWeight: 'bold',
   },
   checkboxLabelContainer: {
     flex: 1,
   },
   checkboxLabel: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '600',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.xs,
+    color: '#F1F5F9',
+    marginBottom: 2,
   },
   checkboxDescription: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    lineHeight: 20,
+    fontSize: 13,
+    color: 'rgba(148, 163, 184, 0.5)',
+    lineHeight: 18,
+  },
+  // ── Actions ──
+  actions: {
+    paddingHorizontal: 16,
+    marginTop: 20,
   },
   createButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 20,
-    borderRadius: BorderRadius.md,
+    backgroundColor: 'rgba(129, 140, 248, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(129, 140, 248, 0.4)',
+    paddingVertical: 18,
+    borderRadius: 14,
     alignItems: 'center',
-    marginBottom: Spacing.md,
+    marginBottom: 12,
   },
   disabledButton: {
-    backgroundColor: Colors.textMuted,
+    opacity: 0.5,
   },
   createButtonText: {
-    color: Colors.white,
-    fontSize: 18,
+    color: '#818CF8',
+    fontSize: 17,
     fontWeight: '600',
+    letterSpacing: 0.5,
   },
   cancelButton: {
-    backgroundColor: 'transparent',
-    paddingVertical: 20,
-    borderRadius: BorderRadius.md,
+    paddingVertical: 18,
+    borderRadius: 14,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: Colors.border,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.15)',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
   },
   cancelButtonText: {
-    color: Colors.textSecondary,
-    fontSize: 18,
+    color: 'rgba(226, 232, 240, 0.5)',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

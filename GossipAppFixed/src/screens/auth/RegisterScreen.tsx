@@ -10,7 +10,8 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { Colors, BorderRadius, Spacing } from '../../constants/theme';
+import StarFieldBackground from '../../components/futuristic/StarFieldBackground';
+import GlassCard from '../../components/futuristic/GlassCard';
 
 interface RegisterScreenProps {
   navigation?: any;
@@ -91,92 +92,94 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Gossip</Text>
-          <Text style={styles.subtitle}>Create Account</Text>
-        </View>
-
-        <View style={styles.form}>
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Full Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your full name"
-              placeholderTextColor={Colors.textMuted}
-              value={name}
-              onChangeText={setName}
-              autoCapitalize="words"
-            />
+    <StarFieldBackground starCount={25} showRadialGlow={false}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Gossip</Text>
+            <Text style={styles.subtitle}>Create Account</Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Username</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Choose a username (e.g., johndoe)"
-              placeholderTextColor={Colors.textMuted}
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.helperText}>Use this to login instead of email</Text>
-          </View>
+          <GlassCard style={styles.formCard} intensity="medium">
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Full Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your full name"
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+              />
+            </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your email"
-              placeholderTextColor={Colors.textMuted}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Username</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Choose a username (e.g., johndoe)"
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text style={styles.helperText}>Use this to login instead of email</Text>
+            </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Create a password (min 6 characters)"
-              placeholderTextColor={Colors.textMuted}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoCapitalize="none"
-            />
-          </View>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Email</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your email"
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Confirm Password</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Confirm your password"
-              placeholderTextColor={Colors.textMuted}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry
-              autoCapitalize="none"
-            />
-          </View>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Password</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Create a password (min 6 characters)"
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            </View>
 
-          <TouchableOpacity
-            style={[styles.registerButton, loading && styles.disabledButton]}
-            onPress={handleRegister}
-            disabled={loading}
-          >
-            <Text style={styles.registerButtonText}>
-              {loading ? 'Creating Account...' : 'Create Account'}
-            </Text>
-          </TouchableOpacity>
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Confirm Password</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Confirm your password"
+                placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.registerButton, loading && styles.disabledButton]}
+              onPress={handleRegister}
+              disabled={loading}
+            >
+              <Text style={styles.registerButtonText}>
+                {loading ? 'Creating Account...' : 'Create Account'}
+              </Text>
+            </TouchableOpacity>
+          </GlassCard>
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
@@ -187,16 +190,17 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
           <TouchableOpacity style={styles.loginButton} onPress={handleBackToLogin}>
             <Text style={styles.loginButtonText}>Already have an account? Sign In</Text>
           </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+
+          <View style={styles.bottomSpacer} />
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </StarFieldBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -204,92 +208,103 @@ const styles = StyleSheet.create({
   header: {
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: 20,
     paddingTop: 70,
-    paddingBottom: 36,
+    paddingBottom: 30,
   },
   title: {
     fontSize: 42,
-    fontWeight: 'bold',
-    color: Colors.primary,
-    marginBottom: Spacing.sm,
+    fontWeight: '700',
+    color: '#818CF8',
+    letterSpacing: 2,
   },
   subtitle: {
-    fontSize: 20,
-    color: Colors.textSecondary,
-    fontWeight: '500',
+    fontSize: 18,
+    color: 'rgba(226, 232, 240, 0.5)',
+    fontWeight: '400',
+    marginTop: 8,
+    letterSpacing: 1,
   },
-  form: {
-    flex: 1,
-    padding: Spacing.xxxl,
+  formCard: {
+    marginHorizontal: 24,
+    padding: 24,
   },
   inputContainer: {
-    marginBottom: Spacing.xl,
+    marginBottom: 16,
   },
   label: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '600',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.sm,
+    color: 'rgba(226, 232, 240, 0.7)',
+    marginBottom: 8,
+    letterSpacing: 0.5,
   },
   input: {
     borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 18,
-    fontSize: 18,
-    color: Colors.textPrimary,
-    backgroundColor: Colors.surface,
+    borderColor: 'rgba(148, 163, 184, 0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#F1F5F9',
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
   },
   helperText: {
-    fontSize: 14,
-    color: Colors.textMuted,
-    marginTop: Spacing.xs,
+    fontSize: 12,
+    color: 'rgba(148, 163, 184, 0.4)',
+    marginTop: 4,
     fontStyle: 'italic',
   },
   registerButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 20,
-    borderRadius: BorderRadius.md,
+    backgroundColor: 'rgba(129, 140, 248, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(129, 140, 248, 0.4)',
+    paddingVertical: 18,
+    borderRadius: 14,
     alignItems: 'center',
-    marginTop: Spacing.md,
+    marginTop: 8,
   },
   disabledButton: {
-    backgroundColor: Colors.textMuted,
+    opacity: 0.5,
   },
   registerButtonText: {
-    color: Colors.white,
-    fontSize: 18,
+    color: '#818CF8',
+    fontSize: 17,
     fontWeight: '600',
+    letterSpacing: 0.5,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: Spacing.xxl,
+    marginVertical: 24,
+    marginHorizontal: 40,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: Colors.border,
+    backgroundColor: 'rgba(148, 163, 184, 0.1)',
   },
   dividerText: {
-    marginHorizontal: Spacing.lg,
-    color: Colors.textMuted,
-    fontSize: 16,
+    marginHorizontal: 16,
+    color: 'rgba(148, 163, 184, 0.3)',
+    fontSize: 14,
   },
   loginButton: {
-    backgroundColor: 'transparent',
-    paddingVertical: 20,
-    borderRadius: BorderRadius.md,
+    marginHorizontal: 24,
+    paddingVertical: 18,
+    borderRadius: 14,
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: Colors.primary,
+    borderWidth: 1,
+    borderColor: 'rgba(129, 140, 248, 0.2)',
+    backgroundColor: 'rgba(129, 140, 248, 0.06)',
   },
   loginButtonText: {
-    color: Colors.primary,
-    fontSize: 18,
+    color: 'rgba(129, 140, 248, 0.8)',
+    fontSize: 16,
     fontWeight: '600',
+  },
+  bottomSpacer: {
+    height: 40,
   },
 });
 

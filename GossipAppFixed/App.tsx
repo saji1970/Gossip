@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { StatusBar, Text, View, StyleSheet } from 'react-native';
+import { StatusBar, Text, View, StyleSheet, ActivityIndicator } from 'react-native';
 import SimpleNavigator from './src/navigation/SimpleNavigator';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
-import { AppProvider } from './src/context/AppContext';
+import { AppProvider, useApp } from './src/context/AppContext';
 import { PersonalityProvider } from './src/context/PersonalityContext';
 import * as TTSService from './src/services/TTSService';
 
@@ -18,28 +18,89 @@ const ThemedStatusBar = () => {
   );
 };
 
-const App = () => {
-  const [currentScreen, setCurrentScreen] = useState<Screen>('Login');
+// Inner component that lives inside AppProvider and can use useApp()
+const AppNavigator = () => {
+  const { user, initialized } = useApp();
+  const [currentScreen, setCurrentScreen] = useState<Screen | null>(null);
   const [screenParams, setScreenParams] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
 
+  // Once AppContext finishes loading, pick the initial screen
   useEffect(() => {
-    console.log('APP COMPONENT MOUNTED');
-    try {
-      console.log('Testing Firebase connection...');
-      console.log('Testing Firestore storage...');
-      TTSService.initialize();
-    } catch (err) {
-      console.error('App initialization error:', err);
-      setError(`App init error: ${err}`);
+    if (!initialized) return;
+    if (currentScreen !== null) return; // already set
+
+    if (user) {
+      console.log('User session restored, going to MainTabs');
+      setCurrentScreen('MainTabs');
+    } else {
+      console.log('No session, showing Login');
+      setCurrentScreen('Login');
     }
-  }, []);
+  }, [initialized]);
+
+  // When user logs out (user becomes null after being set), go to Login
+  useEffect(() => {
+    if (!initialized) return;
+    if (currentScreen === null) return;
+
+    if (!user && currentScreen !== 'Login' && currentScreen !== 'Register') {
+      setCurrentScreen('Login');
+      setScreenParams(null);
+    }
+  }, [user]);
 
   const handleNavigate = (screen: Screen, params?: any) => {
     console.log('Navigating to:', screen, params);
     setCurrentScreen(screen);
     setScreenParams(params || null);
   };
+
+  // Show loading while AppContext checks for stored token
+  if (!initialized || currentScreen === null) {
+    return (
+      <View style={loadStyles.container}>
+        <Text style={loadStyles.title}>Gossip</Text>
+        <ActivityIndicator size="large" color="#818CF8" style={{ marginTop: 20 }} />
+      </View>
+    );
+  }
+
+  return (
+    <SimpleNavigator
+      currentScreen={currentScreen}
+      onNavigate={handleNavigate}
+      params={screenParams}
+    />
+  );
+};
+
+const loadStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#020617',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#818CF8',
+    letterSpacing: 2,
+  },
+});
+
+const App = () => {
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    console.log('APP COMPONENT MOUNTED');
+    try {
+      TTSService.initialize();
+    } catch (err) {
+      console.error('App initialization error:', err);
+      setError(`App init error: ${err}`);
+    }
+  }, []);
 
   if (error) {
     return (
@@ -56,11 +117,7 @@ const App = () => {
       <AppProvider>
         <PersonalityProvider>
           <ThemedStatusBar />
-          <SimpleNavigator
-            currentScreen={currentScreen}
-            onNavigate={handleNavigate}
-            params={screenParams}
-          />
+          <AppNavigator />
         </PersonalityProvider>
       </AppProvider>
     </ThemeProvider>

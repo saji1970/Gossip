@@ -14,7 +14,13 @@ import { useApp } from '../context/AppContext';
 import { useTheme } from '../context/ThemeContext';
 import { Group } from '../utils/GroupStorage';
 import { useVoice } from '../hooks/useVoice';
+import { useVolumeButtons } from '../hooks/useVolumeButtons';
+import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import VoiceCommandOverlay from '../components/voice/VoiceCommandOverlay';
+import StarFieldBackground from '../components/futuristic/StarFieldBackground';
+import GlassCard from '../components/futuristic/GlassCard';
+import GlowingMicOrb from '../components/futuristic/GlowingMicOrb';
+import GlowingIconButton from '../components/futuristic/GlowingIconButton';
 import ChatListScreen from './ChatListScreen';
 import ProfileSection from './settings/ProfileSection';
 import VoiceTrainingSection from './settings/VoiceTrainingSection';
@@ -36,7 +42,14 @@ const tabMeta: Record<TabId, { label: string; icon: string }> = {
 
 const tabList: TabId[] = ['groups', 'chat', 'settings'];
 
-// ── Chat Tab Content (no header) ─────────────────────────────────
+function formatRecordingTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+// ── Chat Tab Content ─────────────────────────────────────────────
 
 const ChatTabContent: React.FC<{ navigation?: any }> = ({ navigation }) => {
   const { groups } = useApp();
@@ -75,7 +88,7 @@ const ChatTabContent: React.FC<{ navigation?: any }> = ({ navigation }) => {
         onPress={() => handleChatPress(item)}
         activeOpacity={0.7}
       >
-        <View style={[chatStyles.avatar, { backgroundColor: color }]}>
+        <View style={[chatStyles.avatar, { borderColor: color }]}>
           <Text style={chatStyles.avatarText}>
             {item.name.charAt(0).toUpperCase()}
           </Text>
@@ -124,32 +137,30 @@ const ChatTabContent: React.FC<{ navigation?: any }> = ({ navigation }) => {
 const chatStyles = StyleSheet.create({
   listContainer: { paddingBottom: Spacing.lg },
   chatItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.xl,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 14, paddingHorizontal: 20,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(71, 85, 105, 0.2)',
   },
   avatar: {
-    width: 52, height: 52, borderRadius: 26,
-    alignItems: 'center', justifyContent: 'center', marginRight: Spacing.lg,
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)', borderWidth: 1.5,
+    alignItems: 'center', justifyContent: 'center', marginRight: 14,
   },
-  avatarText: { color: Colors.white, fontSize: 22, fontWeight: '700' },
+  avatarText: { color: '#F1F5F9', fontSize: 20, fontWeight: '700' },
   chatInfo: { flex: 1, marginRight: Spacing.sm },
-  chatName: { fontSize: 18, fontWeight: '600', color: Colors.textPrimary, marginBottom: 4 },
-  chatLastMessage: { fontSize: 15, color: Colors.textSecondary },
+  chatName: { fontSize: 17, fontWeight: '600', color: '#F1F5F9', marginBottom: 3 },
+  chatLastMessage: { fontSize: 14, color: 'rgba(148, 163, 184, 0.6)' },
   chatRight: { alignItems: 'flex-end', minWidth: 40 },
-  chatTime: { fontSize: 13, color: Colors.textMuted, marginBottom: Spacing.sm },
+  chatTime: { fontSize: 12, color: 'rgba(148, 163, 184, 0.5)', marginBottom: Spacing.sm },
   unreadBadge: {
-    backgroundColor: Colors.unreadBadge, borderRadius: 12,
-    minWidth: 24, height: 24, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
+    backgroundColor: '#818CF8', borderRadius: 12,
+    minWidth: 22, height: 22, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
   },
-  unreadBadgeText: { color: Colors.white, fontSize: 13, fontWeight: 'bold' },
+  unreadBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
   emptyIcon: { fontSize: 64, marginBottom: Spacing.xl },
-  emptyTitle: { fontSize: 24, fontWeight: 'bold', color: Colors.textPrimary, marginBottom: Spacing.md },
-  emptyText: { fontSize: 18, color: Colors.textSecondary, textAlign: 'center', lineHeight: 26 },
+  emptyTitle: { fontSize: 24, fontWeight: '600', color: '#F1F5F9', marginBottom: Spacing.md },
+  emptyText: { fontSize: 16, color: 'rgba(226, 232, 240, 0.6)', textAlign: 'center', lineHeight: 24 },
 });
 
 // ── Settings Tab Content ─────────────────────────────────────────
@@ -160,10 +171,7 @@ const SettingsTabContent: React.FC = () => {
   const { user, setUser } = useApp();
   const { mode, accent, setMode, setAccent, colors } = useTheme();
   const [expanded, setExpanded] = useState<Record<SettingsSection, boolean>>({
-    profile: false,
-    voice: false,
-    notifications: false,
-    appearance: false,
+    profile: false, voice: false, notifications: false, appearance: false,
   });
 
   const toggle = useCallback((section: SettingsSection) => {
@@ -174,17 +182,34 @@ const SettingsTabContent: React.FC = () => {
     Alert.alert('Log Out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Log Out',
-        style: 'destructive',
-        onPress: async () => {
-          await api.logout();
-          setUser(null);
-        },
+        text: 'Log Out', style: 'destructive',
+        onPress: async () => { await api.logout(); setUser(null); },
       },
     ]);
   }, [setUser]);
 
   const accentOptions = Object.values(ACCENT_PRESETS);
+
+  const renderSectionHeader = (
+    section: SettingsSection, icon: string, title: string, subtitle: string, iconColor: string,
+  ) => (
+    <TouchableOpacity
+      style={settingsStyles.sectionHeader}
+      onPress={() => toggle(section)}
+      activeOpacity={0.7}
+    >
+      <View style={settingsStyles.sectionHeaderLeft}>
+        <View style={[settingsStyles.sectionIcon, { backgroundColor: `${iconColor}30` }]}>
+          <Text style={settingsStyles.sectionIconText}>{icon}</Text>
+        </View>
+        <View>
+          <Text style={settingsStyles.sectionTitle}>{title}</Text>
+          <Text style={settingsStyles.sectionSubtitle}>{subtitle}</Text>
+        </View>
+      </View>
+      <Text style={settingsStyles.chevron}>{expanded[section] ? '\u25B2' : '\u25BC'}</Text>
+    </TouchableOpacity>
+  );
 
   return (
     <ScrollView
@@ -192,256 +217,174 @@ const SettingsTabContent: React.FC = () => {
       contentContainerStyle={settingsStyles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
-      {/* Profile Section */}
-      <TouchableOpacity
-        style={settingsStyles.sectionHeader}
-        onPress={() => toggle('profile')}
-        activeOpacity={0.7}
-      >
-        <View style={settingsStyles.sectionHeaderLeft}>
-          <View style={[settingsStyles.sectionIcon, { backgroundColor: colors.primary }]}>
-            <Text style={settingsStyles.sectionIconText}>{'\u{1F464}'}</Text>
-          </View>
-          <View>
-            <Text style={settingsStyles.sectionTitle}>Profile</Text>
-            <Text style={settingsStyles.sectionSubtitle}>
-              {user?.displayName || 'Not signed in'}
-            </Text>
-          </View>
-        </View>
-        <Text style={settingsStyles.chevron}>{expanded.profile ? '\u25B2' : '\u25BC'}</Text>
-      </TouchableOpacity>
-      <ProfileSection expanded={expanded.profile} />
+      <GlassCard style={settingsStyles.card} intensity="low">
+        {renderSectionHeader('profile', '\u{1F464}', 'Profile', user?.displayName || 'Not signed in', '#818CF8')}
+        <ProfileSection expanded={expanded.profile} />
+      </GlassCard>
 
-      {/* Voice Training Section */}
-      <TouchableOpacity
-        style={settingsStyles.sectionHeader}
-        onPress={() => toggle('voice')}
-        activeOpacity={0.7}
-      >
-        <View style={settingsStyles.sectionHeaderLeft}>
-          <View style={[settingsStyles.sectionIcon, { backgroundColor: colors.accent }]}>
-            <Text style={settingsStyles.sectionIconText}>{'\u{1F3A4}'}</Text>
-          </View>
-          <View>
-            <Text style={settingsStyles.sectionTitle}>Voice Training</Text>
-            <Text style={settingsStyles.sectionSubtitle}>Learn voice commands</Text>
-          </View>
-        </View>
-        <Text style={settingsStyles.chevron}>{expanded.voice ? '\u25B2' : '\u25BC'}</Text>
-      </TouchableOpacity>
-      <VoiceTrainingSection expanded={expanded.voice} />
+      <GlassCard style={settingsStyles.card} intensity="low">
+        {renderSectionHeader('voice', '\u{1F3A4}', 'Voice Training', 'Learn voice commands', '#34D399')}
+        <VoiceTrainingSection expanded={expanded.voice} />
+      </GlassCard>
 
-      {/* Notifications Section */}
-      <TouchableOpacity
-        style={settingsStyles.sectionHeader}
-        onPress={() => toggle('notifications')}
-        activeOpacity={0.7}
-      >
-        <View style={settingsStyles.sectionHeaderLeft}>
-          <View style={[settingsStyles.sectionIcon, { backgroundColor: '#FB923C' }]}>
-            <Text style={settingsStyles.sectionIconText}>{'\u{1F514}'}</Text>
-          </View>
-          <View>
-            <Text style={settingsStyles.sectionTitle}>Notifications</Text>
-            <Text style={settingsStyles.sectionSubtitle}>Sound, vibration</Text>
-          </View>
-        </View>
-        <Text style={settingsStyles.chevron}>{expanded.notifications ? '\u25B2' : '\u25BC'}</Text>
-      </TouchableOpacity>
-      <NotificationSection expanded={expanded.notifications} />
+      <GlassCard style={settingsStyles.card} intensity="low">
+        {renderSectionHeader('notifications', '\u{1F514}', 'Notifications', 'Sound, vibration', '#FB923C')}
+        <NotificationSection expanded={expanded.notifications} />
+      </GlassCard>
 
-      {/* Appearance Section */}
-      <TouchableOpacity
-        style={settingsStyles.sectionHeader}
-        onPress={() => toggle('appearance')}
-        activeOpacity={0.7}
-      >
-        <View style={settingsStyles.sectionHeaderLeft}>
-          <View style={[settingsStyles.sectionIcon, { backgroundColor: '#F472B6' }]}>
-            <Text style={settingsStyles.sectionIconText}>{'\u{1F3A8}'}</Text>
+      <GlassCard style={settingsStyles.card} intensity="low">
+        {renderSectionHeader('appearance', '\u{1F3A8}', 'Appearance', 'Theme, colors', '#F472B6')}
+        {expanded.appearance && (
+          <View style={settingsStyles.appearanceContent}>
+            <View style={settingsStyles.themeToggleRow}>
+              <Text style={settingsStyles.themeLabel}>Dark Mode</Text>
+              <Switch
+                value={mode === 'dark'}
+                onValueChange={(val) => setMode(val ? 'dark' : 'light')}
+                trackColor={{ false: 'rgba(71, 85, 105, 0.4)', true: colors.primary }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+            <Text style={settingsStyles.accentLabel}>Accent Color</Text>
+            <View style={settingsStyles.accentGrid}>
+              {accentOptions.map((preset) => {
+                const isActive = accent === preset.name;
+                return (
+                  <TouchableOpacity
+                    key={preset.name}
+                    style={[
+                      settingsStyles.accentOption,
+                      isActive && { borderColor: preset.primary, borderWidth: 2 },
+                    ]}
+                    onPress={() => setAccent(preset.name as AccentName)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[settingsStyles.accentSwatch, { backgroundColor: preset.primary }]} />
+                    <Text style={[settingsStyles.accentName, isActive && { color: preset.primary }]}>
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
-          <View>
-            <Text style={settingsStyles.sectionTitle}>Appearance</Text>
-            <Text style={settingsStyles.sectionSubtitle}>Theme, colors</Text>
-          </View>
-        </View>
-        <Text style={settingsStyles.chevron}>{expanded.appearance ? '\u25B2' : '\u25BC'}</Text>
-      </TouchableOpacity>
-      {expanded.appearance && (
-        <View style={settingsStyles.appearanceContent}>
-          <View style={settingsStyles.themeToggleRow}>
-            <Text style={settingsStyles.themeLabel}>Dark Mode</Text>
-            <Switch
-              value={mode === 'dark'}
-              onValueChange={(val) => setMode(val ? 'dark' : 'light')}
-              trackColor={{ false: Colors.border, true: colors.primary }}
-              thumbColor={Colors.white}
-            />
-          </View>
-          <Text style={settingsStyles.accentLabel}>Accent Color</Text>
-          <View style={settingsStyles.accentGrid}>
-            {accentOptions.map((preset) => {
-              const isActive = accent === preset.name;
-              return (
-                <TouchableOpacity
-                  key={preset.name}
-                  style={[
-                    settingsStyles.accentOption,
-                    isActive && { borderColor: preset.primary, borderWidth: 2 },
-                  ]}
-                  onPress={() => setAccent(preset.name as AccentName)}
-                  activeOpacity={0.7}
-                >
-                  <View style={[settingsStyles.accentSwatch, { backgroundColor: preset.primary }]} />
-                  <Text style={[settingsStyles.accentName, isActive && { color: preset.primary }]}>
-                    {preset.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      )}
+        )}
+      </GlassCard>
 
-      {/* Log Out */}
       <TouchableOpacity style={settingsStyles.logoutButton} onPress={handleLogout}>
         <Text style={settingsStyles.logoutText}>Log Out</Text>
       </TouchableOpacity>
 
-      {/* Version */}
-      <Text style={settingsStyles.version}>v2.4.0 &bull; Gossip</Text>
+      <Text style={settingsStyles.version}>v2.5.0 &bull; Gossip</Text>
     </ScrollView>
   );
 };
 
 const settingsStyles = StyleSheet.create({
-  scrollView: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollContent: {
-    paddingBottom: Spacing.xxxl,
-  },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  card: { marginBottom: 12, padding: 0 },
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16,
   },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
+  sectionHeaderLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   sectionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
+    width: 40, height: 40, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
-  sectionIconText: {
-    fontSize: 20,
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
-  chevron: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    marginLeft: Spacing.sm,
-  },
-  appearanceContent: {
-    paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing.lg,
-  },
+  sectionIconText: { fontSize: 20 },
+  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#F1F5F9' },
+  sectionSubtitle: { fontSize: 13, color: 'rgba(148, 163, 184, 0.6)', marginTop: 1 },
+  chevron: { fontSize: 12, color: 'rgba(148, 163, 184, 0.4)', marginLeft: Spacing.sm },
+  appearanceContent: { paddingHorizontal: 16, paddingBottom: 16 },
   themeToggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.md,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12,
   },
-  themeLabel: {
-    fontSize: 16,
-    color: Colors.textPrimary,
-  },
+  themeLabel: { fontSize: 16, color: '#F1F5F9' },
   accentLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: Spacing.md,
-    marginBottom: Spacing.md,
+    fontSize: 12, fontWeight: '600', color: 'rgba(148, 163, 184, 0.5)',
+    textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 12, marginBottom: 12,
   },
-  accentGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.md,
-  },
+  accentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   accentOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surfaceLight,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
+    borderWidth: 2, borderColor: 'transparent',
   },
-  accentSwatch: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    marginRight: Spacing.sm,
-  },
-  accentName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
+  accentSwatch: { width: 18, height: 18, borderRadius: 9, marginRight: 8 },
+  accentName: { fontSize: 13, fontWeight: '600', color: 'rgba(226, 232, 240, 0.7)' },
   logoutButton: {
-    marginHorizontal: Spacing.xl,
-    marginTop: Spacing.xxl,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    borderColor: Colors.danger,
-    alignItems: 'center',
+    marginHorizontal: 4, marginTop: 20, paddingVertical: 14, borderRadius: 16,
+    borderWidth: 1, borderColor: 'rgba(248, 113, 113, 0.3)',
+    backgroundColor: 'rgba(248, 113, 113, 0.08)', alignItems: 'center',
   },
-  logoutText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: Colors.danger,
-  },
+  logoutText: { fontSize: 16, fontWeight: '600', color: '#F87171' },
   version: {
-    textAlign: 'center',
-    fontSize: 13,
-    color: Colors.textMuted,
-    marginTop: Spacing.lg,
-    marginBottom: Spacing.xxl,
+    textAlign: 'center', fontSize: 12, color: 'rgba(148, 163, 184, 0.3)',
+    marginTop: 16, marginBottom: 24, letterSpacing: 1,
   },
 });
 
 // ── Main Tabs Screen ──────────────────────────────────────────────
 
 const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation, onRefresh }) => {
+  const { groups, user } = useApp();
   const [activeTab, setActiveTab] = useState<TabId>('groups');
   const [overlayVisible, setOverlayVisible] = useState(false);
   const { voiceState } = useVoice();
 
+  // ── Volume Up recording state ──
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const { isRecording, recordingDurationMs, startRecording, stopRecording } = useAudioRecorder();
+
+  // ── Volume button handlers ──
+  const handleVolumeDownLongPress = useCallback(() => {
+    // Toggle voice command overlay
+    setOverlayVisible(prev => !prev);
+  }, []);
+
+  const handleVolumeUpLongPress = useCallback(async () => {
+    if (!isVoiceRecording) {
+      // First long press: start recording
+      try {
+        await startRecording();
+        setIsVoiceRecording(true);
+      } catch (err: any) {
+        Alert.alert('Recording Error', err.message || 'Could not start recording');
+      }
+    } else {
+      // Second long press: stop and send to first group
+      try {
+        const result = await stopRecording();
+        setIsVoiceRecording(false);
+        if (groups.length > 0) {
+          const targetGroup = groups[0];
+          await api.sendVoiceMessage(
+            targetGroup.id,
+            result.uri,
+            result.durationMs,
+            user?.displayName || 'You',
+            undefined,
+          );
+          Alert.alert('Sent', `Voice message sent to ${targetGroup.name}`);
+        } else {
+          Alert.alert('No Group', 'Create a group first to send voice messages.');
+        }
+      } catch (err: any) {
+        Alert.alert('Error', err.message || 'Could not send recording');
+        setIsVoiceRecording(false);
+      }
+    }
+  }, [isVoiceRecording, startRecording, stopRecording, groups, user]);
+
+  useVolumeButtons({
+    onVolumeDownLongPress: handleVolumeDownLongPress,
+    onVolumeUpLongPress: handleVolumeUpLongPress,
+    enabled: true,
+  });
+
+  // ── Voice command handler ──
   const handleVoiceCommand = (type: string, payload: string) => {
     switch (type) {
       case 'navigate':
@@ -455,19 +398,10 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation, onRefresh }
         let params: any = undefined;
         if (payload) {
           try {
-            // Try parsing as JSON (structured command with settings)
             const parsed = JSON.parse(payload);
-            params = {
-              groupName: parsed.name || '',
-              privacy: parsed.privacy,
-              requireApproval: parsed.requireApproval,
-            };
-          } catch {
-            // Plain string — just the group name
-            params = { groupName: payload };
-          }
+            params = { groupName: parsed.name || '', privacy: parsed.privacy, requireApproval: parsed.requireApproval };
+          } catch { params = { groupName: payload }; }
         }
-        console.log('[MainTabs] create_group params:', JSON.stringify(params));
         navigation?.navigate('CreateGroup', params);
         break;
       }
@@ -483,12 +417,24 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation, onRefresh }
     navigation?.navigate('CreateGroup');
   };
 
-  const title = tabMeta[activeTab].label;
-
   const renderContent = () => {
     switch (activeTab) {
       case 'groups':
-        return <ChatListScreen navigation={navigation} onRefresh={onRefresh} />;
+        return (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
+            <ChatListScreen navigation={navigation} onRefresh={onRefresh} skinMode="smart-glasses" />
+
+            {/* Center Orb */}
+            <View style={styles.centerOrbArea}>
+              <GlowingMicOrb
+                state={orbState}
+                size={140}
+                onPress={() => setOverlayVisible(true)}
+              />
+              <Text style={styles.orbLabel}>Say a command...</Text>
+            </View>
+          </ScrollView>
+        );
       case 'chat':
         return <ChatTabContent navigation={navigation} />;
       case 'settings':
@@ -498,171 +444,225 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation, onRefresh }
     }
   };
 
+  const orbState = voiceState === 'listening'
+    ? 'listening'
+    : voiceState === 'processing'
+      ? 'processing'
+      : 'idle';
+
   return (
-    <View style={styles.container}>
-      {/* ── Common top bar ── */}
-      <View style={styles.topBar}>
-        <Text style={styles.topBarTitle}>{title}</Text>
-      </View>
-      <View style={styles.accentLine} />
-
-      {/* ── Common header row: title + mic + optional "+" ── */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{title}</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerButton} onPress={() => setOverlayVisible(true)}>
-            <Text style={styles.headerButtonIcon}>{'\u{1F399}'}</Text>
-          </TouchableOpacity>
-          {activeTab === 'groups' && (
-            <TouchableOpacity style={styles.headerButton} onPress={handleCreateGroup}>
-              <Text style={styles.headerButtonPlusIcon}>+</Text>
-            </TouchableOpacity>
-          )}
+    <StarFieldBackground starCount={35} showRadialGlow={true}>
+      <View style={styles.container}>
+        {/* ── Header: Smart Glasses Voice Chat ── */}
+        <View style={styles.topBar}>
+          <View style={styles.headerRow}>
+            <Text style={styles.headerTitleGlow}>Smart Glasses Voice Chat</Text>
+            <View style={styles.headerActions}>
+              <GlowingIconButton
+                icon={'\u{1F399}'}
+                onPress={() => setOverlayVisible(true)}
+                size={40}
+                glowColor="rgba(96, 165, 250, 0.35)"
+              />
+              <GlowingIconButton
+                icon="+"
+                onPress={handleCreateGroup}
+                size={40}
+                glowColor="rgba(96, 165, 250, 0.35)"
+              />
+            </View>
+          </View>
         </View>
-      </View>
 
-      {/* ── Tab content ── */}
-      <View style={styles.content}>
-        {renderContent()}
-      </View>
+        {/* ── Recording banner (Vol Up active) ── */}
+        {isVoiceRecording && (
+          <View style={styles.recordingBanner}>
+            <View style={styles.recordingDot} />
+            <Text style={styles.recordingBannerText}>
+              Recording {formatRecordingTime(recordingDurationMs)}
+            </Text>
+            <Text style={styles.recordingBannerHint}>Long press Vol Up to send</Text>
+          </View>
+        )}
 
-      {/* ── Bottom tab bar ── */}
-      <View style={styles.tabBar}>
-        {tabList.map((id) => {
-          const isActive = activeTab === id;
-          const meta = tabMeta[id];
-          return (
-            <TouchableOpacity
-              key={id}
-              style={styles.tab}
-              onPress={() => setActiveTab(id)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.tabIconWrapper, isActive && styles.tabIconWrapperActive]}>
-                <Text style={[styles.tabIcon, isActive && styles.tabIconActive]}>
-                  {meta.icon}
-                </Text>
-              </View>
-              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                {meta.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+        {/* ── Tab content ── */}
+        <View style={styles.content}>
+          {renderContent()}
+        </View>
 
-      {/* ── Voice command overlay ── */}
-      <VoiceCommandOverlay
-        visible={overlayVisible}
-        onDismiss={() => setOverlayVisible(false)}
-        onCommand={handleVoiceCommand}
-        context="chat_list"
-      />
-    </View>
+        {/* ── Bottom Dock ── */}
+        <View style={styles.dockContainer}>
+          {/* Horizon arc line */}
+          <View style={styles.horizonArc} />
+
+          <View style={styles.dock}>
+            {tabList.map((id) => {
+              const isActive = activeTab === id;
+              const meta = tabMeta[id];
+              return (
+                <TouchableOpacity
+                  key={id}
+                  style={styles.dockTab}
+                  onPress={() => setActiveTab(id)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.dockIconWrapper, isActive && styles.dockIconWrapperActive]}>
+                    <Text style={[styles.dockIcon, isActive && styles.dockIconActive]}>
+                      {meta.icon}
+                    </Text>
+                  </View>
+                  <Text style={[styles.dockLabel, isActive && styles.dockLabelActive]}>
+                    {meta.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* ── Voice command overlay ── */}
+        <VoiceCommandOverlay
+          visible={overlayVisible}
+          onDismiss={() => setOverlayVisible(false)}
+          onCommand={handleVoiceCommand}
+          context="chat_list"
+        />
+      </View>
+    </StarFieldBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
-  },
-  // ── Top bar ──
-  topBar: {
-    backgroundColor: Colors.headerBar,
-    paddingTop: 50,
-    paddingBottom: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-  },
-  topBarTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-  },
-  accentLine: {
-    height: 2,
-    backgroundColor: Colors.primaryDark,
   },
   // ── Header ──
-  header: {
+  topBar: {
+    paddingTop: 52,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(2, 6, 23, 0.7)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(96, 165, 250, 0.1)',
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.xxl,
-    paddingBottom: Spacing.lg,
   },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: Colors.textPrimary,
+  headerTitleGlow: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#60A5FA',
+    textShadowColor: 'rgba(96, 165, 250, 0.6)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 14,
+    letterSpacing: 0.5,
+    flex: 1,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 10,
   },
-  headerButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.surfaceLight,
+  // ── Recording banner ──
+  recordingBanner: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(248, 113, 113, 0.15)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(248, 113, 113, 0.2)',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    gap: 8,
   },
-  headerButtonIcon: {
-    fontSize: 20,
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#F87171',
   },
-  headerButtonPlusIcon: {
-    fontSize: 28,
-    color: Colors.textPrimary,
-    fontWeight: '300',
-    marginTop: -2,
+  recordingBannerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F87171',
+    fontVariant: ['tabular-nums'],
+  },
+  recordingBannerHint: {
+    fontSize: 12,
+    color: 'rgba(248, 113, 113, 0.6)',
+  },
+  // ── Center Orb ──
+  centerOrbArea: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 24,
+    paddingBottom: 16,
+  },
+  orbLabel: {
+    fontSize: 14,
+    color: 'rgba(148, 163, 184, 0.5)',
+    marginTop: 12,
+    letterSpacing: 0.5,
   },
   // ── Content ──
   content: {
     flex: 1,
   },
-  // ── Tab bar ──
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: Colors.background,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    paddingBottom: 28,
-    paddingTop: Spacing.sm,
+  // ── Floating Glass Dock ──
+  dockContainer: {
+    alignItems: 'center',
   },
-  tab: {
+  horizonArc: {
+    width: '80%',
+    height: 1,
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
+    borderRadius: 1,
+    marginBottom: 4,
+  },
+  dock: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(96, 165, 250, 0.08)',
+    paddingBottom: 28,
+    paddingTop: 10,
+  },
+  dockTab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing.xs,
+    paddingVertical: 4,
   },
-  tabIconWrapper: {
+  dockIconWrapper: {
     width: 56,
-    height: 32,
-    borderRadius: 16,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,
   },
-  tabIconWrapperActive: {
-    backgroundColor: Colors.tabActivePill,
+  dockIconWrapperActive: {
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.2)',
   },
-  tabIcon: {
+  dockIcon: {
     fontSize: 20,
-    color: Colors.textMuted,
+    opacity: 0.35,
   },
-  tabIconActive: {
-    color: Colors.primary,
+  dockIconActive: {
+    opacity: 1,
   },
-  tabLabel: {
-    fontSize: 12,
+  dockLabel: {
+    fontSize: 11,
     fontWeight: '500',
-    color: Colors.textMuted,
+    color: 'rgba(148, 163, 184, 0.35)',
+    letterSpacing: 0.3,
   },
-  tabLabelActive: {
-    color: Colors.textPrimary,
+  dockLabelActive: {
+    color: '#60A5FA',
   },
 });
 

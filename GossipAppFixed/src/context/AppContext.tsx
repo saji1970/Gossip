@@ -13,6 +13,7 @@ interface User {
 interface AppContextType {
   user: User | null;
   setUser: (user: User | null) => void;
+  initialized: boolean;
   groups: Group[];
   addGroup: (group: Group) => void;
   updateGroup: (groupId: string, updates: Partial<Group>) => void;
@@ -235,6 +236,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       value={{
         user,
         setUser: handleSetUser,
+        initialized,
         groups,
         addGroup,
         updateGroup,

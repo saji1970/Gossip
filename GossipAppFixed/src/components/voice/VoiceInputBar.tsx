@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
 import {
   View,
   Text,
@@ -10,8 +10,13 @@ import {
 import { Colors, BorderRadius, Spacing } from '../../constants/theme';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { useAudioPlayback } from '../../hooks/useAudioPlayback';
-import { useHardwareButton } from '../../hooks/useHardwareButton';
 import WhisperPicker, { WhisperMember } from './WhisperPicker';
+
+export interface VoiceInputBarRef {
+  triggerStartRecording: () => Promise<void>;
+  triggerStopAndSend: () => Promise<void>;
+  getIsRecording: () => boolean;
+}
 
 interface VoiceInputBarProps {
   onSendMessage: (text: string) => void;
@@ -28,12 +33,12 @@ function formatRecordingTime(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
+const VoiceInputBar = forwardRef<VoiceInputBarRef, VoiceInputBarProps>(({
   onSendMessage,
   onSendVoiceMessage,
   disabled = false,
   groupMembers = [],
-}) => {
+}, ref) => {
   const { isRecording, recordingDurationMs, startRecording, stopRecording, cancelRecording } = useAudioRecorder();
   const playback = useAudioPlayback();
   const [isTextMode, setIsTextMode] = useState(false);
@@ -42,36 +47,37 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
   const [pendingWhisperTo, setPendingWhisperTo] = useState<string[] | undefined>(undefined);
   const [pendingRecording, setPendingRecording] = useState<{ uri: string; durationMs: number } | null>(null);
 
-  // Track recording state in a ref so hardware button callbacks see the latest value
+  // Track recording state in a ref so callbacks see the latest value
   const isRecordingRef = useRef(false);
   isRecordingRef.current = isRecording;
 
-  const handleHardwarePress = useCallback(async () => {
-    // Only start if idle (not already recording, not in review, not in text mode)
-    if (isRecordingRef.current || disabled) return;
-    try {
-      await startRecording();
-    } catch (err: any) {
-      Alert.alert('Recording Error', err.message || 'Could not start recording');
-    }
-  }, [startRecording, disabled]);
-
-  const handleHardwareRelease = useCallback(async () => {
-    if (!isRecordingRef.current) return;
-    try {
-      const result = await stopRecording();
-      setPendingRecording({ uri: result.uri, durationMs: result.durationMs });
-    } catch (err: any) {
-      Alert.alert('Recording Error', err.message || 'Could not stop recording');
-    }
-  }, [stopRecording]);
-
-  // Volume-down push-to-talk: hold to record, release to review
-  useHardwareButton({
-    onPress: handleHardwarePress,
-    onRelease: handleHardwareRelease,
-    enabled: !isTextMode && !pendingRecording,
-  });
+  // Expose imperative methods for parent (volume button integration)
+  useImperativeHandle(ref, () => ({
+    async triggerStartRecording() {
+      if (isRecordingRef.current || disabled) return;
+      try {
+        await startRecording();
+      } catch (err: any) {
+        Alert.alert('Recording Error', err.message || 'Could not start recording');
+      }
+    },
+    async triggerStopAndSend() {
+      if (!isRecordingRef.current) return;
+      try {
+        const result = await stopRecording();
+        if (result && onSendVoiceMessage) {
+          onSendVoiceMessage(result.uri, result.durationMs, pendingWhisperTo);
+        }
+        setPendingRecording(null);
+        setPendingWhisperTo(undefined);
+      } catch (err: any) {
+        Alert.alert('Recording Error', err.message || 'Could not stop recording');
+      }
+    },
+    getIsRecording() {
+      return isRecordingRef.current;
+    },
+  }));
 
   const handleTextSend = () => {
     if (!textInput.trim()) return;
@@ -240,7 +246,7 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
           activeOpacity={0.7}
         >
           <Text style={styles.micIcon}>&#x1F3A4;</Text>
-          <Text style={styles.micLabel}>Tap or hold Vol Down</Text>
+          <Text style={styles.micLabel}>Tap or Vol Up to record</Text>
         </TouchableOpacity>
 
         {groupMembers.length > 0 && (
@@ -264,7 +270,7 @@ const VoiceInputBar: React.FC<VoiceInputBarProps> = ({
       />
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

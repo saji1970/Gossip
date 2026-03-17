@@ -20,7 +20,7 @@ interface NavigationProps {
 }
 
 // Screens where FloatingMicButton should be hidden
-const HIDE_FAB_SCREENS: Screen[] = ['Login', 'Register', 'ChatRoom', 'GroupCall', 'MainTabs', 'ChatList'];
+const HIDE_FAB_SCREENS: Screen[] = ['Login', 'Register', 'ChatRoom', 'GroupCall', 'MainTabs', 'ChatList', 'CreateGroup', 'GroupSettings', 'InviteMembers', 'TermsAgreement'];
 
 const SimpleNavigator: React.FC<NavigationProps> = ({ currentScreen, onNavigate, params }) => {
   const navigation = {

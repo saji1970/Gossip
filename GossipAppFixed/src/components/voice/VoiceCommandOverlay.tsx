@@ -159,7 +159,6 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
 
       const cmd = parseCommand(trimmed);
       console.log('[VoiceOverlay] executeCommand:', JSON.stringify({ input: trimmed, parsed: cmd }));
-      Alert.alert('Debug', `Heard: "${trimmed}"\nType: ${cmd.type}\nPayload: ${cmd.payload}`)
       onCommand(cmd.type, cmd.payload);
 
       // Auto-dismiss after executing
