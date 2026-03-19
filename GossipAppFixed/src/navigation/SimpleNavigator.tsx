@@ -9,7 +9,6 @@ import ChatRoomScreen from '../screens/ChatRoomScreen';
 import GroupSettingsScreen from '../screens/GroupSettingsScreen';
 import TermsAgreementScreen from '../screens/TermsAgreementScreen';
 import GroupCallScreen from '../screens/GroupCallScreen';
-import FloatingMicButton from '../components/voice/FloatingMicButton';
 
 type Screen = 'Login' | 'Register' | 'MainTabs' | 'ChatList' | 'CreateGroup' | 'InviteMembers' | 'ChatRoom' | 'GroupSettings' | 'TermsAgreement' | 'GroupCall';
 
@@ -19,17 +18,12 @@ interface NavigationProps {
   params?: any;
 }
 
-// Screens where FloatingMicButton should be hidden
-const HIDE_FAB_SCREENS: Screen[] = ['Login', 'Register', 'ChatRoom', 'GroupCall', 'MainTabs', 'ChatList', 'CreateGroup', 'GroupSettings', 'InviteMembers', 'TermsAgreement'];
-
 const SimpleNavigator: React.FC<NavigationProps> = ({ currentScreen, onNavigate, params }) => {
   const navigation = {
     navigate: (screen: Screen, params?: any) => onNavigate(screen, params),
   };
 
   const route = { params };
-
-  const showFab = !HIDE_FAB_SCREENS.includes(currentScreen);
 
   const renderScreen = () => {
     switch (currentScreen) {
@@ -60,17 +54,6 @@ const SimpleNavigator: React.FC<NavigationProps> = ({ currentScreen, onNavigate,
   return (
     <View style={styles.container}>
       {renderScreen()}
-      {showFab && (
-        <FloatingMicButton
-          onNavigate={(screen, navParams) => onNavigate(screen as Screen, navParams)}
-          context={
-            currentScreen === 'ChatList' || currentScreen === 'MainTabs' ? 'chat_list' :
-            currentScreen === 'CreateGroup' ? 'create_group' :
-            currentScreen === 'GroupSettings' ? 'settings' :
-            'global'
-          }
-        />
-      )}
     </View>
   );
 };

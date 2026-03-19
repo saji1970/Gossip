@@ -1,27 +1,31 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
+  TextInput,
   ScrollView,
   Switch,
+  Modal,
   StyleSheet,
   Alert,
+  Keyboard,
 } from 'react-native';
 import { Colors, BorderRadius, Spacing, ACCENT_PRESETS, AccentName } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../context/ThemeContext';
 import { Group } from '../utils/GroupStorage';
 import { useVoice } from '../hooks/useVoice';
-import { useVolumeButtons } from '../hooks/useVolumeButtons';
-import { useAudioRecorder } from '../hooks/useAudioRecorder';
-import VoiceCommandOverlay from '../components/voice/VoiceCommandOverlay';
+import { useGossipBot } from '../hooks/useGossipBot';
+import { conversationHistory } from '../modules/gossip/ConversationHistory';
+import { gossipPersonality } from '../modules/gossip/GossipPersonality';
+import * as ResponseBuilder from '../modules/gossip/ResponseBuilder';
+import { ConversationEntry, GossipOption } from '../modules/gossip/types';
+import Tts from 'react-native-tts';
 import StarFieldBackground from '../components/futuristic/StarFieldBackground';
 import GlassCard from '../components/futuristic/GlassCard';
 import GlowingMicOrb from '../components/futuristic/GlowingMicOrb';
-import GlowingIconButton from '../components/futuristic/GlowingIconButton';
-import ChatListScreen from './ChatListScreen';
 import ProfileSection from './settings/ProfileSection';
 import VoiceTrainingSection from './settings/VoiceTrainingSection';
 import NotificationSection from './settings/NotificationSection';
@@ -32,142 +36,11 @@ interface MainTabsScreenProps {
   onRefresh?: boolean;
 }
 
-type TabId = 'groups' | 'chat' | 'settings';
-
-const tabMeta: Record<TabId, { label: string; icon: string }> = {
-  groups: { label: 'Groups', icon: '\u{1F465}' },
-  chat: { label: 'Chat', icon: '\u{1F4AC}' },
-  settings: { label: 'Settings', icon: '\u2699\uFE0F' },
-};
-
-const tabList: TabId[] = ['groups', 'chat', 'settings'];
-
-function formatRecordingTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-// ── Chat Tab Content ─────────────────────────────────────────────
-
-const ChatTabContent: React.FC<{ navigation?: any }> = ({ navigation }) => {
-  const { groups } = useApp();
-
-  const handleChatPress = (group: Group) => {
-    if (navigation) {
-      navigation.navigate('ChatRoom', { group });
-    }
-  };
-
-  const formatTimestamp = (timestamp: string) => {
-    if (!timestamp) return '';
-    try {
-      const date = new Date(timestamp);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      if (diffMins < 1) return 'now';
-      if (diffMins < 60) return `${diffMins}m`;
-      const diffHours = Math.floor(diffMins / 60);
-      if (diffHours < 24) return `${diffHours}h`;
-      const diffDays = Math.floor(diffHours / 24);
-      return `${diffDays}d`;
-    } catch {
-      return '';
-    }
-  };
-
-  const avatarColors = ['#818CF8', '#34D399', '#FB923C', '#F87171', '#60A5FA', '#A78BFA', '#F472B6'];
-
-  const renderChatItem = ({ item }: { item: Group }) => {
-    const color = avatarColors[item.name.length % avatarColors.length];
-    return (
-      <TouchableOpacity
-        style={chatStyles.chatItem}
-        onPress={() => handleChatPress(item)}
-        activeOpacity={0.7}
-      >
-        <View style={[chatStyles.avatar, { borderColor: color }]}>
-          <Text style={chatStyles.avatarText}>
-            {item.name.charAt(0).toUpperCase()}
-          </Text>
-        </View>
-        <View style={chatStyles.chatInfo}>
-          <Text style={chatStyles.chatName} numberOfLines={1}>{item.name}</Text>
-          <Text style={chatStyles.chatLastMessage} numberOfLines={1}>
-            {item.lastMessage || 'Tap to start chatting'}
-          </Text>
-        </View>
-        <View style={chatStyles.chatRight}>
-          <Text style={chatStyles.chatTime}>{formatTimestamp(item.timestamp)}</Text>
-          {item.unreadCount > 0 && (
-            <View style={chatStyles.unreadBadge}>
-              <Text style={chatStyles.unreadBadgeText}>{item.unreadCount}</Text>
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  if (groups.length === 0) {
-    return (
-      <View style={chatStyles.emptyContainer}>
-        <Text style={chatStyles.emptyIcon}>{'\u{1F4AC}'}</Text>
-        <Text style={chatStyles.emptyTitle}>No Chats Yet</Text>
-        <Text style={chatStyles.emptyText}>
-          Create a group first, then come here to chat
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <FlatList
-      data={groups}
-      renderItem={renderChatItem}
-      keyExtractor={(item) => item.id}
-      contentContainerStyle={chatStyles.listContainer}
-      showsVerticalScrollIndicator={false}
-    />
-  );
-};
-
-const chatStyles = StyleSheet.create({
-  listContainer: { paddingBottom: Spacing.lg },
-  chatItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: 20,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(71, 85, 105, 0.2)',
-  },
-  avatar: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: 'rgba(30, 41, 59, 0.8)', borderWidth: 1.5,
-    alignItems: 'center', justifyContent: 'center', marginRight: 14,
-  },
-  avatarText: { color: '#F1F5F9', fontSize: 20, fontWeight: '700' },
-  chatInfo: { flex: 1, marginRight: Spacing.sm },
-  chatName: { fontSize: 17, fontWeight: '600', color: '#F1F5F9', marginBottom: 3 },
-  chatLastMessage: { fontSize: 14, color: 'rgba(148, 163, 184, 0.6)' },
-  chatRight: { alignItems: 'flex-end', minWidth: 40 },
-  chatTime: { fontSize: 12, color: 'rgba(148, 163, 184, 0.5)', marginBottom: Spacing.sm },
-  unreadBadge: {
-    backgroundColor: '#818CF8', borderRadius: 12,
-    minWidth: 22, height: 22, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
-  },
-  unreadBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
-  emptyIcon: { fontSize: 64, marginBottom: Spacing.xl },
-  emptyTitle: { fontSize: 24, fontWeight: '600', color: '#F1F5F9', marginBottom: Spacing.md },
-  emptyText: { fontSize: 16, color: 'rgba(226, 232, 240, 0.6)', textAlign: 'center', lineHeight: 24 },
-});
-
-// ── Settings Tab Content ─────────────────────────────────────────
+// ── Settings Panel (reused from old SettingsTabContent) ──────────
 
 type SettingsSection = 'profile' | 'voice' | 'notifications' | 'appearance';
 
-const SettingsTabContent: React.FC = () => {
+const SettingsPanel: React.FC<{ visible: boolean; onClose: () => void }> = ({ visible, onClose }) => {
   const { user, setUser } = useApp();
   const { mode, accent, setMode, setAccent, colors } = useTheme();
   const [expanded, setExpanded] = useState<Record<SettingsSection, boolean>>({
@@ -183,10 +56,10 @@ const SettingsTabContent: React.FC = () => {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Log Out', style: 'destructive',
-        onPress: async () => { await api.logout(); setUser(null); },
+        onPress: async () => { await api.logout(); setUser(null); onClose(); },
       },
     ]);
-  }, [setUser]);
+  }, [setUser, onClose]);
 
   const accentOptions = Object.values(ACCENT_PRESETS);
 
@@ -212,77 +85,112 @@ const SettingsTabContent: React.FC = () => {
   );
 
   return (
-    <ScrollView
-      style={settingsStyles.scrollView}
-      contentContainerStyle={settingsStyles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      <GlassCard style={settingsStyles.card} intensity="low">
-        {renderSectionHeader('profile', '\u{1F464}', 'Profile', user?.displayName || 'Not signed in', '#818CF8')}
-        <ProfileSection expanded={expanded.profile} />
-      </GlassCard>
-
-      <GlassCard style={settingsStyles.card} intensity="low">
-        {renderSectionHeader('voice', '\u{1F3A4}', 'Voice Training', 'Learn voice commands', '#34D399')}
-        <VoiceTrainingSection expanded={expanded.voice} />
-      </GlassCard>
-
-      <GlassCard style={settingsStyles.card} intensity="low">
-        {renderSectionHeader('notifications', '\u{1F514}', 'Notifications', 'Sound, vibration', '#FB923C')}
-        <NotificationSection expanded={expanded.notifications} />
-      </GlassCard>
-
-      <GlassCard style={settingsStyles.card} intensity="low">
-        {renderSectionHeader('appearance', '\u{1F3A8}', 'Appearance', 'Theme, colors', '#F472B6')}
-        {expanded.appearance && (
-          <View style={settingsStyles.appearanceContent}>
-            <View style={settingsStyles.themeToggleRow}>
-              <Text style={settingsStyles.themeLabel}>Dark Mode</Text>
-              <Switch
-                value={mode === 'dark'}
-                onValueChange={(val) => setMode(val ? 'dark' : 'light')}
-                trackColor={{ false: 'rgba(71, 85, 105, 0.4)', true: colors.primary }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-            <Text style={settingsStyles.accentLabel}>Accent Color</Text>
-            <View style={settingsStyles.accentGrid}>
-              {accentOptions.map((preset) => {
-                const isActive = accent === preset.name;
-                return (
-                  <TouchableOpacity
-                    key={preset.name}
-                    style={[
-                      settingsStyles.accentOption,
-                      isActive && { borderColor: preset.primary, borderWidth: 2 },
-                    ]}
-                    onPress={() => setAccent(preset.name as AccentName)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[settingsStyles.accentSwatch, { backgroundColor: preset.primary }]} />
-                    <Text style={[settingsStyles.accentName, isActive && { color: preset.primary }]}>
-                      {preset.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={settingsStyles.overlay}>
+        <View style={settingsStyles.panel}>
+          <View style={settingsStyles.panelHeader}>
+            <Text style={settingsStyles.panelTitle}>Settings</Text>
+            <TouchableOpacity onPress={onClose} style={settingsStyles.closeBtn}>
+              <Text style={settingsStyles.closeBtnText}>{'\u2715'}</Text>
+            </TouchableOpacity>
           </View>
-        )}
-      </GlassCard>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+            <GlassCard style={settingsStyles.card} intensity="low">
+              {renderSectionHeader('profile', '\u{1F464}', 'Profile', user?.displayName || 'Not signed in', '#818CF8')}
+              <ProfileSection expanded={expanded.profile} />
+            </GlassCard>
 
-      <TouchableOpacity style={settingsStyles.logoutButton} onPress={handleLogout}>
-        <Text style={settingsStyles.logoutText}>Log Out</Text>
-      </TouchableOpacity>
+            <GlassCard style={settingsStyles.card} intensity="low">
+              {renderSectionHeader('voice', '\u{1F3A4}', 'Voice Training', 'Learn voice commands', '#34D399')}
+              <VoiceTrainingSection expanded={expanded.voice} />
+            </GlassCard>
 
-      <Text style={settingsStyles.version}>v2.5.0 &bull; Gossip</Text>
-    </ScrollView>
+            <GlassCard style={settingsStyles.card} intensity="low">
+              {renderSectionHeader('notifications', '\u{1F514}', 'Notifications', 'Sound, vibration', '#FB923C')}
+              <NotificationSection expanded={expanded.notifications} />
+            </GlassCard>
+
+            <GlassCard style={settingsStyles.card} intensity="low">
+              {renderSectionHeader('appearance', '\u{1F3A8}', 'Appearance', 'Theme, colors', '#F472B6')}
+              {expanded.appearance && (
+                <View style={settingsStyles.appearanceContent}>
+                  <View style={settingsStyles.themeToggleRow}>
+                    <Text style={settingsStyles.themeLabel}>Dark Mode</Text>
+                    <Switch
+                      value={mode === 'dark'}
+                      onValueChange={(val) => setMode(val ? 'dark' : 'light')}
+                      trackColor={{ false: 'rgba(71, 85, 105, 0.4)', true: colors.primary }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
+                  <Text style={settingsStyles.accentLabel}>Accent Color</Text>
+                  <View style={settingsStyles.accentGrid}>
+                    {accentOptions.map((preset) => {
+                      const isActive = accent === preset.name;
+                      return (
+                        <TouchableOpacity
+                          key={preset.name}
+                          style={[
+                            settingsStyles.accentOption,
+                            isActive && { borderColor: preset.primary, borderWidth: 2 },
+                          ]}
+                          onPress={() => setAccent(preset.name as AccentName)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[settingsStyles.accentSwatch, { backgroundColor: preset.primary }]} />
+                          <Text style={[settingsStyles.accentName, isActive && { color: preset.primary }]}>
+                            {preset.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+            </GlassCard>
+
+            <TouchableOpacity style={settingsStyles.logoutButton} onPress={handleLogout}>
+              <Text style={settingsStyles.logoutText}>Log Out</Text>
+            </TouchableOpacity>
+
+            <Text style={settingsStyles.version}>v3.0.0 &bull; Gossip</Text>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 };
 
 const settingsStyles = StyleSheet.create({
-  scrollView: { flex: 1 },
-  scrollContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  panel: {
+    backgroundColor: '#0F172A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '85%',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  panelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(148, 163, 184, 0.1)',
+    marginBottom: 8,
+  },
+  panelTitle: { fontSize: 20, fontWeight: '700', color: '#F1F5F9' },
+  closeBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  closeBtnText: { fontSize: 16, color: '#94A3B8' },
   card: { marginBottom: 12, padding: 0 },
   sectionHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16,
@@ -326,72 +234,125 @@ const settingsStyles = StyleSheet.create({
   },
 });
 
-// ── Main Tabs Screen ──────────────────────────────────────────────
+// ── Main Conversational AI Home ─────────────────────────────────
 
-const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation, onRefresh }) => {
-  const { groups, user } = useApp();
-  const [activeTab, setActiveTab] = useState<TabId>('groups');
-  const [overlayVisible, setOverlayVisible] = useState(false);
-  const { voiceState } = useVoice();
+const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
+  const { groups, user, setUser } = useApp();
+  const { voiceState, startListening, stopListening, lastResult } = useVoice();
+  const { processInput } = useGossipBot();
+  const [messages, setMessages] = useState<ConversationEntry[]>([]);
+  const [textInput, setTextInput] = useState('');
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const flatListRef = useRef<FlatList>(null);
+  const lastProcessedResult = useRef<string | null>(null);
+  const hasWelcomed = useRef(false);
 
-  // ── Volume Up recording state ──
-  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
-  const { isRecording, recordingDurationMs, startRecording, stopRecording } = useAudioRecorder();
-
-  // ── Volume button handlers ──
-  const handleVolumeDownLongPress = useCallback(() => {
-    // Toggle voice command overlay
-    setOverlayVisible(prev => !prev);
+  // Load conversation history on mount
+  useEffect(() => {
+    const loadHistory = async () => {
+      await conversationHistory.load();
+      const history = conversationHistory.getAll();
+      if (history.length > 0) {
+        setMessages(history);
+      } else if (!hasWelcomed.current && user) {
+        hasWelcomed.current = true;
+        const welcomeText = ResponseBuilder.buildWelcomeBack(
+          user.displayName || user.email,
+          gossipPersonality.getMood(),
+        );
+        const entry = conversationHistory.addGossipMessage(welcomeText);
+        setMessages([entry]);
+      }
+    };
+    loadHistory();
   }, []);
 
-  const handleVolumeUpLongPress = useCallback(async () => {
-    if (!isVoiceRecording) {
-      // First long press: start recording
-      try {
-        await startRecording();
-        setIsVoiceRecording(true);
-      } catch (err: any) {
-        Alert.alert('Recording Error', err.message || 'Could not start recording');
-      }
-    } else {
-      // Second long press: stop and send to first group
-      try {
-        const result = await stopRecording();
-        setIsVoiceRecording(false);
-        if (groups.length > 0) {
-          const targetGroup = groups[0];
-          await api.sendVoiceMessage(
-            targetGroup.id,
-            result.uri,
-            result.durationMs,
-            user?.displayName || 'You',
-            undefined,
-          );
-          Alert.alert('Sent', `Voice message sent to ${targetGroup.name}`);
-        } else {
-          Alert.alert('No Group', 'Create a group first to send voice messages.');
-        }
-      } catch (err: any) {
-        Alert.alert('Error', err.message || 'Could not send recording');
-        setIsVoiceRecording(false);
-      }
+  // Handle voice results
+  useEffect(() => {
+    if (lastResult && lastResult.text && lastResult.text !== lastProcessedResult.current) {
+      lastProcessedResult.current = lastResult.text;
+      handleUserInput(lastResult.text);
     }
-  }, [isVoiceRecording, startRecording, stopRecording, groups, user]);
+  }, [lastResult]);
 
-  useVolumeButtons({
-    onVolumeDownLongPress: handleVolumeDownLongPress,
-    onVolumeUpLongPress: handleVolumeUpLongPress,
-    enabled: true,
-  });
+  const handleUserInput = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
 
-  // ── Voice command handler ──
-  const handleVoiceCommand = (type: string, payload: string) => {
+    // Add user message
+    const userEntry = conversationHistory.addUserMessage(trimmed);
+    setMessages(prev => [...prev, userEntry]);
+
+    // Process through GossipBot
+    const response = await processInput(trimmed, 'MainTabs');
+
+    // Add gossip response
+    const gossipEntry = conversationHistory.addGossipMessage(
+      response.message,
+      response.options,
+    );
+    setMessages(prev => [...prev, gossipEntry]);
+
+    // Speak response
+    try { Tts.speak(response.message); } catch {}
+
+    // Handle execute commands
+    if (response.type === 'execute' && response.command) {
+      const cmd = response.command;
+      setTimeout(() => {
+        handleCommand(cmd.type, cmd.payload);
+        const actionEntry = conversationHistory.addSystemMessage(
+          `Done: ${cmd.type.replace(/_/g, ' ')}`,
+          cmd.type,
+        );
+        setMessages(prev => [...prev, actionEntry]);
+      }, 800);
+    }
+  };
+
+  const handleTextSubmit = () => {
+    if (!textInput.trim()) return;
+    Keyboard.dismiss();
+    handleUserInput(textInput);
+    setTextInput('');
+  };
+
+  const handleOptionTap = async (option: GossipOption) => {
+    // Add user selection as a message
+    const userEntry = conversationHistory.addUserMessage(option.label);
+    setMessages(prev => [...prev, userEntry]);
+
+    // Process the option through GossipBot
+    const response = await processInput(option.label, 'MainTabs');
+    const gossipEntry = conversationHistory.addGossipMessage(response.message, response.options);
+    setMessages(prev => [...prev, gossipEntry]);
+
+    // If it has a command, execute it
+    const cmd = response.command || option.command;
+    if (cmd) {
+      setTimeout(() => {
+        handleCommand(cmd.type, cmd.payload);
+        const actionEntry = conversationHistory.addSystemMessage(
+          `Done: ${cmd.type.replace(/_/g, ' ')}`,
+          cmd.type,
+        );
+        setMessages(prev => [...prev, actionEntry]);
+      }, 600);
+    }
+  };
+
+  const handleCommand = (type: string, payload: string) => {
     switch (type) {
       case 'navigate':
-        if (payload === 'chat' || payload === 'group' || payload === 'home') {
-          setActiveTab('groups');
-        } else if (payload === 'setting') {
-          setActiveTab('settings');
+        if (payload === 'logout') {
+          Alert.alert('Log Out', 'Are you sure?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Log Out', style: 'destructive', onPress: async () => { await api.logout(); setUser(null); } },
+          ]);
+        } else if (payload === 'settings_theme' || payload === 'settings_profile' || payload === 'setting') {
+          setSettingsVisible(true);
+        } else if (payload === 'chat' || payload === 'group' || payload === 'home') {
+          // Already home
         }
         break;
       case 'create_group': {
@@ -405,43 +366,43 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation, onRefresh }
         navigation?.navigate('CreateGroup', params);
         break;
       }
-      case 'open_chat':
-        setActiveTab('chat');
+      case 'open_chat': {
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.groupId) {
+            const targetGroup = groups.find(g => g.id === parsed.groupId);
+            if (targetGroup) {
+              navigation?.navigate('ChatRoom', { group: targetGroup });
+            }
+          }
+        } catch {}
         break;
-      default:
+      }
+      case 'private_chat':
+        // DM support — navigate to chat list for now
         break;
+      case 'call_group': {
+        if (payload) {
+          const targetGroup = groups.find(g => g.id === payload);
+          if (targetGroup) {
+            navigation?.navigate('GroupCall', { group: targetGroup });
+          }
+        }
+        break;
+      }
     }
   };
 
-  const handleCreateGroup = () => {
-    navigation?.navigate('CreateGroup');
+  const handleOrbPress = () => {
+    if (voiceState === 'listening') {
+      stopListening();
+    } else {
+      startListening();
+    }
   };
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'groups':
-        return (
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
-            <ChatListScreen navigation={navigation} onRefresh={onRefresh} skinMode="smart-glasses" />
-
-            {/* Center Orb */}
-            <View style={styles.centerOrbArea}>
-              <GlowingMicOrb
-                state={orbState}
-                size={140}
-                onPress={() => setOverlayVisible(true)}
-              />
-              <Text style={styles.orbLabel}>Say a command...</Text>
-            </View>
-          </ScrollView>
-        );
-      case 'chat':
-        return <ChatTabContent navigation={navigation} />;
-      case 'settings':
-        return <SettingsTabContent />;
-      default:
-        return null;
-    }
+  const handleGroupPillPress = (group: Group) => {
+    navigation?.navigate('ChatRoom', { group });
   };
 
   const orbState = voiceState === 'listening'
@@ -450,82 +411,154 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation, onRefresh }
       ? 'processing'
       : 'idle';
 
+  // ── Render a conversation bubble ──
+  const renderMessage = ({ item }: { item: ConversationEntry }) => {
+    if (item.role === 'system') {
+      return (
+        <View style={styles.systemRow}>
+          <Text style={styles.systemIcon}>{'\u2713'}</Text>
+          <Text style={styles.systemText}>{item.text}</Text>
+        </View>
+      );
+    }
+
+    if (item.role === 'user') {
+      return (
+        <View style={styles.userRow}>
+          <View style={styles.userBubble}>
+            <Text style={styles.userBubbleText}>{item.text}</Text>
+          </View>
+        </View>
+      );
+    }
+
+    // Gossip bubble
+    return (
+      <View style={styles.gossipRow}>
+        <View style={styles.gossipBubble}>
+          <Text style={styles.gossipLabel}>Gossip</Text>
+          <Text style={styles.gossipBubbleText}>{item.text}</Text>
+          {item.options && item.options.length > 0 && (
+            <View style={styles.optionPills}>
+              {item.options.map((opt, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.optionPill}
+                  onPress={() => handleOptionTap(opt)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.optionPillText}>{opt.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const avatarColors = ['#818CF8', '#34D399', '#FB923C', '#F87171', '#60A5FA', '#A78BFA', '#F472B6'];
+
   return (
     <StarFieldBackground starCount={35} showRadialGlow={true}>
       <View style={styles.container}>
-        {/* ── Header: Smart Glasses Voice Chat ── */}
+        {/* ── Header ── */}
         <View style={styles.topBar}>
-          <View style={styles.headerRow}>
-            <Text style={styles.headerTitleGlow}>Smart Glasses Voice Chat</Text>
-            <View style={styles.headerActions}>
-              <GlowingIconButton
-                icon={'\u{1F399}'}
-                onPress={() => setOverlayVisible(true)}
-                size={40}
-                glowColor="rgba(96, 165, 250, 0.35)"
-              />
-              <GlowingIconButton
-                icon="+"
-                onPress={handleCreateGroup}
-                size={40}
-                glowColor="rgba(96, 165, 250, 0.35)"
-              />
-            </View>
-          </View>
+          <Text style={styles.headerTitle}>Gossip</Text>
+          <TouchableOpacity
+            style={styles.settingsBtn}
+            onPress={() => setSettingsVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.settingsIcon}>{'\u2699\uFE0F'}</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* ── Recording banner (Vol Up active) ── */}
-        {isVoiceRecording && (
-          <View style={styles.recordingBanner}>
-            <View style={styles.recordingDot} />
-            <Text style={styles.recordingBannerText}>
-              Recording {formatRecordingTime(recordingDurationMs)}
-            </Text>
-            <Text style={styles.recordingBannerHint}>Long press Vol Up to send</Text>
-          </View>
-        )}
-
-        {/* ── Tab content ── */}
-        <View style={styles.content}>
-          {renderContent()}
-        </View>
-
-        {/* ── Bottom Dock ── */}
-        <View style={styles.dockContainer}>
-          {/* Horizon arc line */}
-          <View style={styles.horizonArc} />
-
-          <View style={styles.dock}>
-            {tabList.map((id) => {
-              const isActive = activeTab === id;
-              const meta = tabMeta[id];
+        {/* ── Group Pills ── */}
+        {groups.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.groupPillsContainer}
+            contentContainerStyle={styles.groupPillsContent}
+          >
+            {groups.slice(0, 10).map((g) => {
+              const color = avatarColors[g.name.length % avatarColors.length];
               return (
                 <TouchableOpacity
-                  key={id}
-                  style={styles.dockTab}
-                  onPress={() => setActiveTab(id)}
+                  key={g.id}
+                  style={styles.groupPill}
+                  onPress={() => handleGroupPillPress(g)}
                   activeOpacity={0.7}
                 >
-                  <View style={[styles.dockIconWrapper, isActive && styles.dockIconWrapperActive]}>
-                    <Text style={[styles.dockIcon, isActive && styles.dockIconActive]}>
-                      {meta.icon}
+                  <View style={[styles.groupPillAvatar, { borderColor: color }]}>
+                    <Text style={styles.groupPillAvatarText}>
+                      {g.name.charAt(0).toUpperCase()}
                     </Text>
                   </View>
-                  <Text style={[styles.dockLabel, isActive && styles.dockLabelActive]}>
-                    {meta.label}
+                  <Text style={styles.groupPillName} numberOfLines={1}>
+                    {g.name}
                   </Text>
+                  {g.unreadCount > 0 && (
+                    <View style={styles.groupPillBadge}>
+                      <Text style={styles.groupPillBadgeText}>{g.unreadCount}</Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
+        )}
+
+        {/* ── Conversation FlatList ── */}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          style={styles.chatList}
+          contentContainerStyle={styles.chatListContent}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          showsVerticalScrollIndicator={false}
+        />
+
+        {/* ── Mic Orb ── */}
+        <View style={styles.orbArea}>
+          <GlowingMicOrb
+            state={orbState}
+            size={100}
+            onPress={handleOrbPress}
+          />
+          <Text style={styles.orbLabel}>
+            {voiceState === 'listening' ? 'Listening...' : 'Tap to talk'}
+          </Text>
         </View>
 
-        {/* ── Voice command overlay ── */}
-        <VoiceCommandOverlay
-          visible={overlayVisible}
-          onDismiss={() => setOverlayVisible(false)}
-          onCommand={handleVoiceCommand}
-          context="chat_list"
+        {/* ── Text Input Fallback ── */}
+        <View style={styles.inputBar}>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Type a message..."
+            placeholderTextColor="rgba(148, 163, 184, 0.4)"
+            value={textInput}
+            onChangeText={setTextInput}
+            onSubmitEditing={handleTextSubmit}
+            returnKeyType="send"
+          />
+          <TouchableOpacity
+            style={[styles.sendBtn, !textInput.trim() && styles.sendBtnDisabled]}
+            onPress={handleTextSubmit}
+            disabled={!textInput.trim()}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sendBtnText}>{'\u2192'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Settings Panel ── */}
+        <SettingsPanel
+          visible={settingsVisible}
+          onClose={() => setSettingsVisible(false)}
         />
       </View>
     </StarFieldBackground>
@@ -539,130 +572,202 @@ const styles = StyleSheet.create({
   // ── Header ──
   topBar: {
     paddingTop: 52,
-    paddingBottom: 14,
+    paddingBottom: 12,
     paddingHorizontal: 20,
-    backgroundColor: 'rgba(2, 6, 23, 0.7)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(96, 165, 250, 0.1)',
-  },
-  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: 'rgba(2, 6, 23, 0.7)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(129, 140, 248, 0.1)',
   },
-  headerTitleGlow: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#60A5FA',
-    textShadowColor: 'rgba(96, 165, 250, 0.6)',
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#818CF8',
+    letterSpacing: 1,
+    textShadowColor: 'rgba(129, 140, 248, 0.5)',
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 14,
-    letterSpacing: 0.5,
+    textShadowRadius: 12,
+  },
+  settingsBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(148, 163, 184, 0.15)',
+  },
+  settingsIcon: { fontSize: 20 },
+  // ── Group Pills ──
+  groupPillsContainer: {
+    maxHeight: 72,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(148, 163, 184, 0.08)',
+  },
+  groupPillsContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 12,
+    alignItems: 'center',
+  },
+  groupPill: {
+    alignItems: 'center',
+    marginRight: 4,
+    width: 60,
+  },
+  groupPillAvatar: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)', borderWidth: 1.5,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  groupPillAvatarText: { color: '#F1F5F9', fontSize: 16, fontWeight: '700' },
+  groupPillName: {
+    fontSize: 10, color: 'rgba(226, 232, 240, 0.6)',
+    marginTop: 3, textAlign: 'center', width: 56,
+  },
+  groupPillBadge: {
+    position: 'absolute', top: -2, right: 4,
+    backgroundColor: '#818CF8', borderRadius: 8,
+    minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
+  },
+  groupPillBadgeText: { color: '#FFF', fontSize: 9, fontWeight: 'bold' },
+  // ── Chat List ──
+  chatList: {
     flex: 1,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  // ── Recording banner ──
-  recordingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(248, 113, 113, 0.15)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(248, 113, 113, 0.2)',
-    paddingVertical: 8,
+  chatListContent: {
     paddingHorizontal: 16,
-    gap: 8,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
-  recordingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#F87171',
+  // ── Message Bubbles ──
+  userRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 10,
   },
-  recordingBannerText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#F87171',
-    fontVariant: ['tabular-nums'],
+  userBubble: {
+    backgroundColor: '#312E81',
+    borderRadius: 18,
+    borderBottomRightRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    maxWidth: '78%',
   },
-  recordingBannerHint: {
-    fontSize: 12,
-    color: 'rgba(248, 113, 113, 0.6)',
+  userBubbleText: {
+    color: '#E0E7FF',
+    fontSize: 15,
+    lineHeight: 21,
   },
-  // ── Center Orb ──
-  centerOrbArea: {
-    alignItems: 'center',
+  gossipRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginBottom: 10,
+  },
+  gossipBubble: {
+    backgroundColor: '#1E293B',
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    maxWidth: '85%',
+    borderLeftWidth: 3,
+    borderLeftColor: '#818CF8',
+  },
+  gossipLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#818CF8',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  gossipBubbleText: {
+    color: '#E2E8F0',
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  systemRow: {
+    flexDirection: 'row',
     justifyContent: 'center',
-    paddingTop: 24,
-    paddingBottom: 16,
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 6,
+  },
+  systemIcon: {
+    fontSize: 12,
+    color: '#34D399',
+  },
+  systemText: {
+    fontSize: 12,
+    color: 'rgba(148, 163, 184, 0.5)',
+    fontStyle: 'italic',
+  },
+  // ── Option Pills ──
+  optionPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    gap: 6,
+  },
+  optionPill: {
+    backgroundColor: 'rgba(129, 140, 248, 0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(129, 140, 248, 0.3)',
+  },
+  optionPillText: {
+    color: '#818CF8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  // ── Orb Area ──
+  orbArea: {
+    alignItems: 'center',
+    paddingTop: 4,
+    paddingBottom: 2,
   },
   orbLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: 'rgba(148, 163, 184, 0.5)',
-    marginTop: 12,
-    letterSpacing: 0.5,
-  },
-  // ── Content ──
-  content: {
-    flex: 1,
-  },
-  // ── Floating Glass Dock ──
-  dockContainer: {
-    alignItems: 'center',
-  },
-  horizonArc: {
-    width: '80%',
-    height: 1,
-    backgroundColor: 'rgba(96, 165, 250, 0.15)',
-    borderRadius: 1,
-    marginBottom: 4,
-  },
-  dock: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(96, 165, 250, 0.08)',
-    paddingBottom: 28,
-    paddingTop: 10,
-  },
-  dockTab: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 4,
-  },
-  dockIconWrapper: {
-    width: 56,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  dockIconWrapperActive: {
-    backgroundColor: 'rgba(96, 165, 250, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(96, 165, 250, 0.2)',
-  },
-  dockIcon: {
-    fontSize: 20,
-    opacity: 0.35,
-  },
-  dockIconActive: {
-    opacity: 1,
-  },
-  dockLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: 'rgba(148, 163, 184, 0.35)',
+    marginTop: -8,
     letterSpacing: 0.3,
   },
-  dockLabelActive: {
-    color: '#60A5FA',
+  // ── Input Bar ──
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingBottom: 28,
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 163, 184, 0.08)',
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    height: 42,
+    backgroundColor: 'rgba(30, 41, 59, 0.6)',
+    borderRadius: 21,
+    paddingHorizontal: 16,
+    color: '#F1F5F9',
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.12)',
+  },
+  sendBtn: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: '#818CF8',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  sendBtnDisabled: {
+    backgroundColor: 'rgba(129, 140, 248, 0.3)',
+  },
+  sendBtnText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
   },
 });
 

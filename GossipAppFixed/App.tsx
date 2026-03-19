@@ -5,6 +5,7 @@ import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AppProvider, useApp } from './src/context/AppContext';
 import { PersonalityProvider } from './src/context/PersonalityContext';
 import * as TTSService from './src/services/TTSService';
+import { gossipBot } from './src/modules/gossip/GossipBot';
 
 type Screen = 'Login' | 'Register' | 'MainTabs' | 'ChatList' | 'CreateGroup' | 'InviteMembers' | 'ChatRoom' | 'GroupSettings' | 'TermsAgreement' | 'GroupCall';
 
@@ -96,6 +97,7 @@ const App = () => {
     console.log('APP COMPONENT MOUNTED');
     try {
       TTSService.initialize();
+      gossipBot.initialize();
     } catch (err) {
       console.error('App initialization error:', err);
       setError(`App init error: ${err}`);

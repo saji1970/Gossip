@@ -11,6 +11,11 @@ const SARCASM_PATTERNS = [
   /no kidding/i,
   /what a surprise/i,
   /how shocking/i,
+  /\bbffr\b/i,
+  /\bnpc\b/i,
+  /L \+ ratio/i,
+  /\bsmh\b/i,
+  /\big\b/i,
 ];
 
 const EXCITEMENT_PATTERNS = [
@@ -23,6 +28,16 @@ const EXCITEMENT_PATTERNS = [
   /so excited/i,
   /let's go/i,
   /yesss+/i,
+  /\bslay\b/i,
+  /\bfire\b/i,
+  /no cap.+fire/i,
+  /\bgoat\b/i,
+  /\bftw\b/i,
+  /\brizz\b/i,
+  /\bceo\s+of\b/i,
+  /\bW\b/,
+  /\bfrfr\b/i,
+  /bussin/i,
 ];
 
 const ANGER_PATTERNS = [
@@ -35,6 +50,11 @@ const ANGER_PATTERNS = [
   /fed up/i,
   /annoying/i,
   /ridiculous/i,
+  /\bidc\b/i,
+  /not it/i,
+  /\bpressed\b/i,
+  /\btoxic\b/i,
+  /\bL\b/,
 ];
 
 const CURIOSITY_PATTERNS = [
@@ -46,6 +66,12 @@ const CURIOSITY_PATTERNS = [
   /what do you/i,
   /do you think/i,
   /I wonder/i,
+  /\biykyk\b/i,
+  /\boomf\b/i,
+  /spill the tea/i,
+  /\bpov\b/i,
+  /\bfomo\b/i,
+  /\blmk\b/i,
 ];
 
 const AMUSEMENT_PATTERNS = [
@@ -57,6 +83,12 @@ const AMUSEMENT_PATTERNS = [
   /dying/i,
   /hilarious/i,
   /funny/i,
+  /\bbruh\b/i,
+  /screaming/i,
+  /crying/i,
+  /\bbye+\b/i,
+  /\bhelp\b/i,
+  /\baf\b/i,
 ];
 
 const SURPRISE_PATTERNS = [
@@ -68,6 +100,11 @@ const SURPRISE_PATTERNS = [
   /shut up/i,
   /you're joking/i,
   /for real/i,
+  /\bshook\b/i,
+  /no cap\?/i,
+  /\btbh\b/i,
+  /\bfr\b\??/i,
+  /\bbtw\b/i,
 ];
 
 function countMatches(text: string, patterns: RegExp[]): number {

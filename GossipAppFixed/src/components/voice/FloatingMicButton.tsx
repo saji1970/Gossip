@@ -9,11 +9,13 @@ import { ScreenContext } from '../../modules/voice/VoiceCommandParser';
 interface FloatingMicButtonProps {
   onNavigate: (screen: string, params?: any) => void;
   context?: ScreenContext;
+  currentScreen?: string;
 }
 
 const FloatingMicButton: React.FC<FloatingMicButtonProps> = ({
   onNavigate,
   context = 'global',
+  currentScreen = 'MainTabs',
 }) => {
   const { voiceState } = useVoice();
   const [overlayVisible, setOverlayVisible] = useState(false);
@@ -28,16 +30,32 @@ const FloatingMicButton: React.FC<FloatingMicButtonProps> = ({
         if (payload === 'chat' || payload === 'group' || payload === 'home') {
           onNavigate('ChatList');
         } else if (payload === 'setting') {
-          // No dedicated settings screen in current nav
           onNavigate('ChatList');
         }
         break;
       case 'create_group':
         onNavigate('CreateGroup', payload ? { groupName: payload } : undefined);
         break;
-      case 'open_chat':
-        // In a real implementation, look up group by name
+      case 'open_chat': {
+        // Try to parse JSON payload from GossipBot (contains groupId)
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.groupId) {
+            onNavigate('ChatRoom', { group: { id: parsed.groupId } });
+            break;
+          }
+        } catch {}
         onNavigate('ChatList');
+        break;
+      }
+      case 'private_chat':
+        // For now, navigate to chat list (DM support TBD)
+        onNavigate('ChatList');
+        break;
+      case 'call_group':
+        if (payload) {
+          onNavigate('GroupCall', { groupId: payload });
+        }
         break;
       default:
         break;
@@ -59,6 +77,7 @@ const FloatingMicButton: React.FC<FloatingMicButtonProps> = ({
         onDismiss={() => setOverlayVisible(false)}
         onCommand={handleCommand}
         context={context}
+        currentScreen={currentScreen}
       />
     </>
   );

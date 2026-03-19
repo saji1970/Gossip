@@ -94,7 +94,28 @@ class AudioService {
       });
     }
 
-    await this.recorder.startRecorder(path, audioSet);
+    try {
+      await this.recorder.startRecorder(path, audioSet);
+    } catch (err: any) {
+      // Handle "startRecorder has already been called" — force stop and retry once
+      if (err?.message?.includes('already been called')) {
+        try {
+          await this.recorder.stopRecorder();
+        } catch {
+          // ignore stop errors
+        }
+        this.recorder.removeRecordBackListener();
+        await this.recorder.startRecorder(path, audioSet);
+        if (onTick) {
+          this.recorder.addRecordBackListener((e) => {
+            onTick(e.currentPosition);
+          });
+        }
+      } else {
+        this.isCurrentlyRecording = false;
+        throw err;
+      }
+    }
   }
 
   async stopRecording(): Promise<RecordingResult> {

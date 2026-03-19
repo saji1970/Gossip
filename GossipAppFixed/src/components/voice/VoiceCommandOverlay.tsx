@@ -6,15 +6,18 @@ import {
   Animated,
   StyleSheet,
   Dimensions,
-  Platform,
-  Alert,
+  ScrollView,
 } from 'react-native';
 import Voice, {
   SpeechResultsEvent,
   SpeechErrorEvent,
 } from '@react-native-voice/voice';
+import Tts from 'react-native-tts';
 import { Colors, BorderRadius, Spacing } from '../../constants/theme';
-import { parseCommand, getSuggestions, ScreenContext } from '../../modules/voice/VoiceCommandParser';
+import { getSuggestions, ScreenContext } from '../../modules/voice/VoiceCommandParser';
+import { useGossipBot } from '../../hooks/useGossipBot';
+import { GossipResponse, GossipOption, GossipResponseType } from '../../modules/gossip/types';
+import { Group } from '../../utils/GroupStorage';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -23,6 +26,8 @@ interface VoiceCommandOverlayProps {
   onDismiss: () => void;
   onCommand: (type: string, payload: string) => void;
   context?: ScreenContext;
+  currentScreen?: string;
+  currentGroup?: Group;
 }
 
 type ListenState = 'idle' | 'listening' | 'processing' | 'result' | 'error';
@@ -32,6 +37,8 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
   onDismiss,
   onCommand,
   context = 'global',
+  currentScreen = 'MainTabs',
+  currentGroup,
 }) => {
   const slideAnim = useRef(new Animated.Value(screenHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -41,6 +48,14 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
   const [partialText, setPartialText] = useState('');
   const [finalText, setFinalText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // ── Conversation mode state ──
+  const [conversationMode, setConversationMode] = useState(false);
+  const [gossipMessage, setGossipMessage] = useState('');
+  const [gossipOptions, setGossipOptions] = useState<GossipOption[]>([]);
+  const [gossipResponseType, setGossipResponseType] = useState<GossipResponseType | null>(null);
+
+  const { processInput, reset: resetGossipBot } = useGossipBot();
 
   // Pulse animation for mic while listening
   useEffect(() => {
@@ -79,6 +94,11 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
       const code = e.error?.code;
       // code 6 = no speech detected, code 7 = no match
       if (code === '6' || code === '7') {
+        // In conversation mode, stay in conversation mode on no-speech
+        if (conversationMode) {
+          setListenState('idle');
+          return;
+        }
         setErrorMsg('No speech detected. Tap the mic to try again.');
       } else {
         setErrorMsg(e.error?.message || 'Speech recognition error');
@@ -88,7 +108,6 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
 
     const onSpeechEnd = () => {
       console.log('[VoiceOverlay] onSpeechEnd');
-      // Only transition if we're still in listening state (not already result/error)
       setListenState((prev) => (prev === 'listening' ? 'processing' : prev));
     };
 
@@ -100,7 +119,7 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
     return () => {
       Voice.destroy().then(Voice.removeAllListeners);
     };
-  }, []);
+  }, [conversationMode]);
 
   // Start listening when overlay becomes visible
   useEffect(() => {
@@ -109,14 +128,17 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
       setPartialText('');
       setErrorMsg('');
       setListenState('idle');
+      setConversationMode(false);
+      setGossipMessage('');
+      setGossipOptions([]);
+      setGossipResponseType(null);
+
+      startListening();
 
       Animated.parallel([
-        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 65, friction: 10 }),
-        Animated.timing(backdropOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
-      ]).start(() => {
-        // Auto-start listening after panel slides up
-        startListening();
-      });
+        Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 80, friction: 9 }),
+        Animated.timing(backdropOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      ]).start();
     } else {
       Voice.stop().catch(() => {});
       Voice.cancel().catch(() => {});
@@ -134,6 +156,11 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
       setPartialText('');
       setErrorMsg('');
       setListenState('listening');
+      try {
+        await Voice.cancel();
+      } catch {
+        // ignore
+      }
       await Voice.start('en-US');
       console.log('[VoiceOverlay] Voice.start() succeeded');
     } catch (err: any) {
@@ -152,17 +179,82 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
     }
   }, []);
 
+  // ── GossipBot-powered command execution ──
   const executeCommand = useCallback(
-    (text: string) => {
+    async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
 
-      const cmd = parseCommand(trimmed);
-      console.log('[VoiceOverlay] executeCommand:', JSON.stringify({ input: trimmed, parsed: cmd }));
-      onCommand(cmd.type, cmd.payload);
+      console.log('[VoiceOverlay] executeCommand via GossipBot:', trimmed);
 
-      // Auto-dismiss after executing
-      setTimeout(() => onDismiss(), 600);
+      try {
+        const response = await processInput(trimmed, currentScreen, currentGroup);
+        handleGossipResponse(response);
+      } catch (err) {
+        console.error('[VoiceOverlay] GossipBot error:', err);
+        // Fallback: just show unknown
+        setConversationMode(true);
+        setGossipMessage('Something went wrong ngl. Try again?');
+        setGossipOptions([]);
+        setGossipResponseType('unknown');
+        setListenState('idle');
+      }
+    },
+    [processInput, currentScreen, currentGroup, onCommand, onDismiss],
+  );
+
+  const handleGossipResponse = useCallback(
+    (response: GossipResponse) => {
+      console.log('[VoiceOverlay] GossipBot response:', response.type, response.message);
+
+      switch (response.type) {
+        case 'execute': {
+          // Direct execution — run the command and dismiss
+          if (response.command) {
+            onCommand(response.command.type, response.command.payload);
+          }
+          setTimeout(() => handleDismiss(), 600);
+          break;
+        }
+
+        case 'clarify':
+        case 'unknown': {
+          // Enter conversation mode — show Gossip's message + options
+          setConversationMode(true);
+          setGossipMessage(response.message);
+          setGossipOptions(response.options || []);
+          setGossipResponseType(response.type);
+          setListenState('idle');
+
+          // TTS speak the message
+          try {
+            Tts.stop();
+            Tts.speak(response.message);
+          } catch {
+            // TTS not critical
+          }
+          break;
+        }
+
+        case 'info': {
+          // Show informational message, auto-dismiss after 5s
+          setConversationMode(true);
+          setGossipMessage(response.message);
+          setGossipOptions([]);
+          setGossipResponseType('info');
+          setListenState('idle');
+
+          try {
+            Tts.stop();
+            Tts.speak(response.message);
+          } catch {
+            // TTS not critical
+          }
+
+          setTimeout(() => handleDismiss(), 5000);
+          break;
+        }
+      }
     },
     [onCommand, onDismiss],
   );
@@ -182,11 +274,116 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
     executeCommand(clean);
   };
 
+  const handleOptionTap = useCallback(
+    (option: GossipOption) => {
+      console.log('[VoiceOverlay] Option tapped:', option.label);
+      try { Tts.stop(); } catch {}
+
+      if (option.command) {
+        onCommand(option.command.type, option.command.payload);
+      }
+      setTimeout(() => handleDismiss(), 400);
+    },
+    [onCommand],
+  );
+
+  const handleDismiss = useCallback(() => {
+    try { Tts.stop(); } catch {}
+    resetGossipBot();
+    setConversationMode(false);
+    setGossipMessage('');
+    setGossipOptions([]);
+    setGossipResponseType(null);
+    onDismiss();
+  }, [onDismiss, resetGossipBot]);
+
+  const handleFollowUpMic = useCallback(async () => {
+    try { Tts.stop(); } catch {}
+    // Start listening for a follow-up voice response
+    startListening();
+  }, [startListening]);
+
   const suggestions = getSuggestions(context);
 
   if (!visible) return null;
 
+  // ── Conversation mode rendering ──
+  const renderConversationContent = () => {
+    return (
+      <View style={styles.conversationContainer}>
+        {/* Gossip chat bubble */}
+        <View style={styles.gossipBubble}>
+          <Text style={styles.gossipLabel}>Gossip</Text>
+          <Text style={styles.gossipMessageText}>{gossipMessage}</Text>
+        </View>
+
+        {/* Option pills */}
+        {gossipOptions.length > 0 && (
+          <ScrollView
+            style={styles.optionsScroll}
+            contentContainerStyle={styles.optionsContainer}
+            showsVerticalScrollIndicator={false}
+          >
+            {gossipOptions.map((option, i) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.optionPill}
+                onPress={() => handleOptionTap(option)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.optionLabel}>{option.label}</Text>
+                <Text style={styles.optionDescription}>{option.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* Follow-up mic button (for clarify/unknown only) */}
+        {(gossipResponseType === 'clarify' || gossipResponseType === 'unknown') && (
+          <View style={styles.followUpContainer}>
+            {listenState === 'listening' ? (
+              <View style={styles.followUpListening}>
+                <Animated.View style={[styles.followUpMic, styles.followUpMicActive, { transform: [{ scale: pulseAnim }] }]}>
+                  <TouchableOpacity onPress={stopListening} activeOpacity={0.7} style={styles.followUpMicTouchable}>
+                    <Text style={styles.followUpMicEmoji}>{'\u{1F3A4}'}</Text>
+                  </TouchableOpacity>
+                </Animated.View>
+                <Text style={styles.followUpHint}>Listening...</Text>
+                {partialText !== '' && (
+                  <Text style={styles.partialText}>{partialText}</Text>
+                )}
+              </View>
+            ) : listenState === 'processing' ? (
+              <View style={styles.followUpListening}>
+                <View style={[styles.followUpMic, styles.followUpMicIdle]}>
+                  <Text style={styles.followUpMicEmoji}>{'\u{1F3A4}'}</Text>
+                </View>
+                <Text style={styles.followUpHint}>Processing...</Text>
+              </View>
+            ) : (
+              <View style={styles.followUpListening}>
+                <TouchableOpacity
+                  style={[styles.followUpMic]}
+                  onPress={handleFollowUpMic}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.followUpMicEmoji}>{'\u{1F3A4}'}</Text>
+                </TouchableOpacity>
+                <Text style={styles.followUpHint}>Or tap to reply by voice</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
   const renderStateContent = () => {
+    // If in conversation mode, show conversation UI
+    if (conversationMode) {
+      return renderConversationContent();
+    }
+
     switch (listenState) {
       case 'idle':
       case 'listening':
@@ -230,7 +427,7 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
               <Text style={styles.resultLabel}>Heard:</Text>
               <Text style={styles.resultText}>{finalText}</Text>
             </View>
-            <Text style={styles.executingLabel}>Executing command...</Text>
+            <Text style={styles.executingLabel}>Processing with Gossip...</Text>
           </View>
         );
 
@@ -257,7 +454,7 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onDismiss} activeOpacity={1} />
+        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={handleDismiss} activeOpacity={1} />
       </Animated.View>
 
       <Animated.View style={[styles.panel, { transform: [{ translateY: slideAnim }] }]}>
@@ -265,17 +462,19 @@ const VoiceCommandOverlay: React.FC<VoiceCommandOverlayProps> = ({
 
         {renderStateContent()}
 
-        {/* Quick actions */}
-        <View style={styles.suggestions}>
-          <Text style={styles.suggestionsTitle}>Or try saying:</Text>
-          {suggestions.map((s, i) => (
-            <TouchableOpacity key={i} onPress={() => handleQuickAction(s)} activeOpacity={0.6}>
-              <Text style={styles.suggestionItem}>{s}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Quick actions — hide in conversation mode */}
+        {!conversationMode && (
+          <View style={styles.suggestions}>
+            <Text style={styles.suggestionsTitle}>Or try saying:</Text>
+            {suggestions.map((s, i) => (
+              <TouchableOpacity key={i} onPress={() => handleQuickAction(s)} activeOpacity={0.6}>
+                <Text style={styles.suggestionItem}>{s}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-        <TouchableOpacity style={styles.cancelButton} onPress={onDismiss}>
+        <TouchableOpacity style={styles.cancelButton} onPress={handleDismiss}>
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
       </Animated.View>
@@ -300,6 +499,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.md,
     paddingBottom: Spacing.xxxl + 10,
     minHeight: 380,
+    maxHeight: screenHeight * 0.75,
   },
   handle: {
     width: 40,
@@ -442,6 +642,100 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.textMuted,
     fontWeight: '500',
+  },
+  // ── Conversation mode ──
+  conversationContainer: {
+    paddingVertical: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  gossipBubble: {
+    backgroundColor: Colors.background,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+    marginBottom: Spacing.lg,
+  },
+  gossipLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    marginBottom: Spacing.xs,
+  },
+  gossipMessageText: {
+    fontSize: 16,
+    color: Colors.textPrimary,
+    lineHeight: 24,
+  },
+  optionsScroll: {
+    maxHeight: 200,
+  },
+  optionsContainer: {
+    gap: Spacing.sm,
+    paddingBottom: Spacing.sm,
+  },
+  optionPill: {
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    minHeight: 56,
+    justifyContent: 'center',
+  },
+  optionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  optionDescription: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  // ── Follow-up mic ──
+  followUpContainer: {
+    alignItems: 'center',
+    marginTop: Spacing.lg,
+  },
+  followUpListening: {
+    alignItems: 'center',
+  },
+  followUpMic: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.surfaceLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+  },
+  followUpMicActive: {
+    backgroundColor: Colors.primary,
+    elevation: 4,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  followUpMicIdle: {
+    backgroundColor: Colors.surfaceLight,
+  },
+  followUpMicTouchable: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  followUpMicEmoji: {
+    fontSize: 24,
+  },
+  followUpHint: {
+    fontSize: 13,
+    color: Colors.textMuted,
   },
 });
 

@@ -458,6 +458,8 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         onDismiss={() => setVoiceOverlayVisible(false)}
         onCommand={handleVoiceCommand}
         context="chat_room"
+        currentScreen="ChatRoom"
+        currentGroup={group}
       />
 
       {/* Glasses HUD Overlay */}
