@@ -5,27 +5,24 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  TextInput,
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native';
 import { Group } from '../utils/GroupStorage';
 import { useApp } from '../context/AppContext';
-import { Colors, BorderRadius, Spacing } from '../constants/theme';
-import VoiceInputBar, { VoiceInputBarRef } from '../components/voice/VoiceInputBar';
+import { Colors } from '../constants/theme';
 import VoiceCommandOverlay from '../components/voice/VoiceCommandOverlay';
 import { useVolumeButtons } from '../hooks/useVolumeButtons';
-import VoiceTimeline, { TimelineMessage } from '../components/voice/VoiceTimeline';
-import PredictiveSuggestions from '../components/voice/PredictiveSuggestions';
-import AIOrb, { OrbState } from '../components/voice/AIOrb';
-import GlassesHUD from '../components/voice/GlassesHUD';
+import { useVoice } from '../hooks/useVoice';
 import GlassCard from '../components/futuristic/GlassCard';
+import GlowingMicOrb from '../components/futuristic/GlowingMicOrb';
 import GlowingIconButton from '../components/futuristic/GlowingIconButton';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 import { useTTS } from '../hooks/useTTS';
-import { useGlassesMode } from '../hooks/useGlassesMode';
 import * as LastReadService from '../services/LastReadService';
-import { WhisperMember } from '../components/voice/WhisperPicker';
 import * as api from '../services/api';
 
 interface ChatRoomScreenProps {
@@ -44,39 +41,46 @@ interface Message {
   audioUri?: string;
   audioDuration?: number;
   whisperTo?: string[];
-  personalityBadge?: string;
 }
 
 const messagesByGroup = new Map<string, Message[]>();
+
+const AVATAR_COLORS = ['#818CF8', '#34D399', '#FB923C', '#F87171', '#60A5FA', '#A78BFA', '#F472B6'];
+
+function formatDuration(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+}
 
 const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) => {
   const { user, getGroupById } = useApp();
   const groupId = route?.params?.group?.id;
   const [group, setGroup] = useState<Group | undefined>(route?.params?.group);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [textInput, setTextInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const lastProcessedResult = useRef<string | null>(null);
 
   const playback = useAudioPlayback();
   const tts = useTTS();
-  const { glassesMode, toggleGlassesMode } = useGlassesMode();
+  const { voiceState, startListening, stopListening, lastResult } = useVoice();
   const [voiceOverlayVisible, setVoiceOverlayVisible] = useState(false);
-  const voiceInputRef = useRef<VoiceInputBarRef>(null);
+  const [ambientMode, setAmbientMode] = useState(false);
 
   // ── Volume button handlers ──
   const handleVolDownLongPress = useCallback(() => {
     setVoiceOverlayVisible(prev => !prev);
   }, []);
 
-  const handleVolUpLongPress = useCallback(async () => {
-    if (!voiceInputRef.current) return;
-    if (voiceInputRef.current.getIsRecording()) {
-      await voiceInputRef.current.triggerStopAndSend();
+  const handleVolUpLongPress = useCallback(() => {
+    if (voiceState === 'listening') {
+      stopListening();
     } else {
-      await voiceInputRef.current.triggerStartRecording();
+      startListening();
     }
-  }, []);
+  }, [voiceState, startListening, stopListening]);
 
   useVolumeButtons({
     onVolumeDownLongPress: handleVolDownLongPress,
@@ -84,12 +88,8 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     enabled: true,
   });
 
-  // AI state
+  // AI suggestions
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [orbState, setOrbState] = useState<OrbState>('idle');
-  const [activeSpeakerId, setActiveSpeakerId] = useState<string | undefined>();
-  const [ambientMode, setAmbientMode] = useState(false);
 
   useEffect(() => {
     if (groupId) {
@@ -118,16 +118,20 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }
   }, [messages.length]);
 
+  // Handle voice STT results
+  useEffect(() => {
+    if (lastResult && lastResult.text && lastResult.text !== lastProcessedResult.current) {
+      lastProcessedResult.current = lastResult.text;
+      handleSendMessage(lastResult.text);
+    }
+  }, [lastResult]);
+
   const fetchSuggestions = useCallback(async (text: string) => {
-    setSuggestionsLoading(true);
-    setOrbState('processing');
     try {
       const result = await api.getReplySuggestions(text, 'neutral', 'general', {}, 3);
       setSuggestions(result);
-      setOrbState('responding');
       setTimeout(() => {
         setSuggestions(prev => prev === result ? [] : prev);
-        setOrbState(prev => prev === 'responding' ? 'idle' : prev);
       }, 15000);
     } catch {
       setSuggestions([
@@ -135,9 +139,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         'Tell me more',
         'Interesting!',
       ]);
-      setOrbState('idle');
     }
-    setSuggestionsLoading(false);
   }, []);
 
   const loadMessages = () => {
@@ -176,32 +178,16 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     addMessage(message);
     setSending(false);
     setSuggestions([]);
-    setOrbState('idle');
 
     api.sendMessage(groupId, userName, text.trim()).catch(() => {});
   }, [groupId, sending, user, addMessage]);
 
-  const handleSendVoiceMessage = useCallback((audioUri: string, durationMs: number, whisperTo?: string[]) => {
-    if (!groupId) return;
-    const userName = user?.displayName || 'You';
-    const userEmail = user?.email || 'user@example.com';
-
-    const message: Message = {
-      id: Date.now().toString(),
-      senderId: userEmail,
-      senderName: userName,
-      content: '[Voice message]',
-      timestamp: new Date(),
-      isOwnMessage: true,
-      type: 'voice',
-      audioUri,
-      audioDuration: durationMs,
-      whisperTo: whisperTo && whisperTo.length > 0 ? whisperTo : undefined,
-    };
-
-    addMessage(message);
-    api.sendVoiceMessage(groupId, audioUri, durationMs, userName, whisperTo).catch(() => {});
-  }, [groupId, user, addMessage]);
+  const handleTextSubmit = () => {
+    if (!textInput.trim()) return;
+    Keyboard.dismiss();
+    handleSendMessage(textInput);
+    setTextInput('');
+  };
 
   const handleDeleteMessage = useCallback((messageId: string) => {
     Alert.alert('Delete message', 'Are you sure?', [
@@ -219,13 +205,12 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     ]);
   }, [groupId]);
 
-  const handleSuggestionSelect = useCallback((text: string, _index: number) => {
+  const handleSuggestionSelect = useCallback((text: string) => {
     handleSendMessage(text);
   }, [handleSendMessage]);
 
   const handleSummarize = useCallback(async () => {
     if (!groupId) return;
-    setOrbState('processing');
     try {
       const result = await api.getConversationSummary(groupId);
       const summaryMsg: Message = {
@@ -238,11 +223,8 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         type: 'summary',
       };
       addMessage(summaryMsg);
-      setOrbState('responding');
-      setTimeout(() => setOrbState('idle'), 3000);
     } catch {
       Alert.alert('Error', 'Could not generate summary');
-      setOrbState('idle');
     }
   }, [groupId, addMessage]);
 
@@ -257,23 +239,11 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     );
   };
 
-  const whisperMembers: WhisperMember[] = (group?.members || [])
-    .filter(m => m.status === 'approved' && m.email !== user?.email)
-    .map(m => ({ email: m.email }));
-
   const visibleMessages = messages.filter((msg) => {
     if (!msg.whisperTo || msg.whisperTo.length === 0) return true;
     const currentEmail = user?.email || '';
     return msg.isOwnMessage || msg.whisperTo.includes(currentEmail);
   });
-
-  // Convert to timeline messages
-  const timelineMessages: TimelineMessage[] = visibleMessages.map(m => ({
-    ...m,
-    isCurrentTrack: playback.currentUri === m.audioUri,
-    isPlaying: playback.isPlaying && playback.currentUri === m.audioUri,
-    progress: playback.currentUri === m.audioUri ? playback.progress : 0,
-  }));
 
   // Filter to only text/voice messages for TTS (exclude 'summary')
   const speakableMessages = visibleMessages.filter(m => m.type === 'text' || m.type === 'voice') as Array<{
@@ -306,11 +276,9 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         break;
       case 'start_ambient':
         setAmbientMode(true);
-        setOrbState('listening');
         break;
       case 'stop_ambient':
         setAmbientMode(false);
-        setOrbState('idle');
         break;
       default:
         break;
@@ -319,12 +287,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
 
   const handlePlayAudio = useCallback((uri: string, dur?: number) => {
     playback.play(uri, dur);
-    const msg = messages.find(m => m.audioUri === uri);
-    if (msg) {
-      setActiveSpeakerId(msg.senderId);
-      setTimeout(() => setActiveSpeakerId(undefined), (dur || 3000));
-    }
-  }, [playback, messages]);
+  }, [playback]);
 
   const handleReadAloudPress = () => {
     if (tts.isSpeaking) {
@@ -334,7 +297,119 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }
   };
 
-  const lastVisible = visibleMessages[visibleMessages.length - 1];
+  const handleOrbPress = () => {
+    if (voiceState === 'listening') {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+  const orbDisplayState = voiceState === 'listening'
+    ? 'listening'
+    : voiceState === 'processing'
+      ? 'processing'
+      : 'idle';
+
+  // ── Render message bubble (matching MainTabsScreen style) ──
+  const renderMessage = ({ item }: { item: Message }) => {
+    // Summary card
+    if (item.type === 'summary') {
+      return (
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryHeader}>
+            <Text style={styles.summaryIcon}>{'\u2728'}</Text>
+            <Text style={styles.summaryTitle}>AI Summary</Text>
+          </View>
+          <Text style={styles.summaryBody}>{item.content}</Text>
+        </View>
+      );
+    }
+
+    // Own message (right side, purple)
+    if (item.isOwnMessage) {
+      return (
+        <View style={styles.userRow}>
+          <TouchableOpacity
+            style={styles.userBubble}
+            onLongPress={() => handleDeleteMessage(item.id)}
+            activeOpacity={0.9}
+          >
+            {item.type === 'voice' && item.audioUri ? (
+              <TouchableOpacity onPress={() => handlePlayAudio(item.audioUri!, item.audioDuration)} activeOpacity={0.7}>
+                <View style={styles.voiceRow}>
+                  <Text style={styles.voicePlayIcon}>
+                    {playback.isPlaying && playback.currentUri === item.audioUri ? '\u23F8' : '\u25B6'}
+                  </Text>
+                  <View style={styles.voiceWaveArea}>
+                    {Array.from({ length: 16 }, (_, i) => {
+                      const h = Math.sin(i * 0.8) * 0.4 + 0.5;
+                      const progress = playback.currentUri === item.audioUri ? playback.progress : 0;
+                      const filled = i / 16 <= progress;
+                      return (
+                        <View key={i} style={[styles.waveBar, { height: 20 * h, backgroundColor: filled ? '#E0E7FF' : 'rgba(224,231,255,0.3)' }]} />
+                      );
+                    })}
+                  </View>
+                  <Text style={styles.voiceDurationOwn}>{formatDuration(item.audioDuration || 0)}</Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.userBubbleText}>{item.content}</Text>
+            )}
+            {item.whisperTo && item.whisperTo.length > 0 && (
+              <Text style={styles.whisperBadge}>{'\u{1F512}'} Whisper</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // Other person's message (left side, with sender name label + purple left border)
+    const avatarColor = AVATAR_COLORS[item.senderName.length % AVATAR_COLORS.length];
+    const displayName = item.senderName.split('@')[0];
+
+    return (
+      <View style={styles.otherRow}>
+        <View style={styles.otherBubble}>
+          <Text style={[styles.senderLabel, { color: avatarColor }]}>{displayName}</Text>
+          {item.type === 'voice' && item.audioUri ? (
+            <TouchableOpacity onPress={() => handlePlayAudio(item.audioUri!, item.audioDuration)} activeOpacity={0.7}>
+              <View style={styles.voiceRow}>
+                <Text style={[styles.voicePlayIcon, { color: avatarColor }]}>
+                  {playback.isPlaying && playback.currentUri === item.audioUri ? '\u23F8' : '\u25B6'}
+                </Text>
+                <View style={styles.voiceWaveArea}>
+                  {Array.from({ length: 16 }, (_, i) => {
+                    const h = Math.sin(i * 0.8) * 0.4 + 0.5;
+                    const progress = playback.currentUri === item.audioUri ? playback.progress : 0;
+                    const filled = i / 16 <= progress;
+                    return (
+                      <View key={i} style={[styles.waveBar, { height: 20 * h, backgroundColor: filled ? avatarColor : `${avatarColor}33` }]} />
+                    );
+                  })}
+                </View>
+                <Text style={styles.voiceDuration}>{formatDuration(item.audioDuration || 0)}</Text>
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.otherBubbleText}>{item.content}</Text>
+          )}
+          {item.whisperTo && item.whisperTo.length > 0 && (
+            <Text style={styles.whisperBadge}>{'\u{1F512}'} Whisper</Text>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const renderEmpty = () => (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyIcon}>{'\u{1F399}'}</Text>
+      <Text style={styles.emptyTitle}>No messages yet</Text>
+      <Text style={styles.emptySubtitle}>Tap the mic or type to start chatting</Text>
+    </View>
+  );
 
   if (!group) {
     return (
@@ -348,7 +423,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     <View style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.keyboardView}>
 
-        {/* Glassmorphism Header */}
+        {/* ── Header ── */}
         <View style={styles.groupHeader}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.navigate('ChatList')}>
             <Text style={styles.backButtonText}>{'\u2190'}</Text>
@@ -369,27 +444,10 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
             </View>
           </TouchableOpacity>
 
-          {/* AI Orb */}
-          <View style={styles.orbContainer}>
-            <AIOrb state={orbState} size={32} />
-          </View>
-
           <GlowingIconButton
             icon={tts.isSpeaking ? '\u23F9' : '\u{1F50A}'}
             onPress={handleReadAloudPress}
             size={34}
-          />
-          <GlowingIconButton
-            icon={'\u{1F3A4}'}
-            onPress={() => setVoiceOverlayVisible(true)}
-            size={34}
-          />
-          <GlowingIconButton
-            icon={'\u{1F453}'}
-            onPress={toggleGlassesMode}
-            size={34}
-            active={glassesMode}
-            glowColor="rgba(129, 140, 248, 0.4)"
           />
           <GlowingIconButton
             icon={'\u{1F4DE}'}
@@ -398,7 +456,7 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
           />
         </View>
 
-        {/* Members Panel */}
+        {/* ── Members Panel ── */}
         {showMembers && group.members && (
           <GlassCard style={styles.membersPanel} intensity="high">
             {group.members.filter(m => m.status === 'approved').map((member) => {
@@ -423,33 +481,67 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
           </GlassCard>
         )}
 
-        {/* Voice Timeline */}
-        <VoiceTimeline
-          messages={timelineMessages}
-          activeSpeakerId={activeSpeakerId}
-          onPlayAudio={handlePlayAudio}
-          onDeleteMessage={handleDeleteMessage}
-          glassesMode={glassesMode}
-          flatListRef={flatListRef}
+        {/* ── Message List (same style as MainTabsScreen) ── */}
+        <FlatList
+          ref={flatListRef}
+          data={visibleMessages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          ListEmptyComponent={renderEmpty}
+          style={styles.chatList}
+          contentContainerStyle={styles.chatListContent}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          showsVerticalScrollIndicator={false}
         />
 
-        {/* Predictive Suggestions */}
-        <PredictiveSuggestions
-          suggestions={suggestions}
-          onSelect={handleSuggestionSelect}
-          visible={suggestions.length > 0 || suggestionsLoading}
-          loading={suggestionsLoading}
-        />
+        {/* ── Suggestion Pills ── */}
+        {suggestions.length > 0 && (
+          <View style={styles.suggestionsRow}>
+            {suggestions.map((s, i) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.suggestionPill}
+                onPress={() => handleSuggestionSelect(s)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.suggestionPillText} numberOfLines={1}>{s}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-        {/* Voice Input Bar */}
-        <VoiceInputBar
-          ref={voiceInputRef}
-          onSendMessage={handleSendMessage}
-          onSendVoiceMessage={handleSendVoiceMessage}
-          disabled={sending}
-          groupName={group.name}
-          groupMembers={whisperMembers}
-        />
+        {/* ── Mic Orb ── */}
+        <View style={styles.orbArea}>
+          <GlowingMicOrb
+            state={orbDisplayState}
+            size={80}
+            onPress={handleOrbPress}
+          />
+          <Text style={styles.orbLabel}>
+            {voiceState === 'listening' ? 'Listening...' : 'Tap to talk'}
+          </Text>
+        </View>
+
+        {/* ── Text Input ── */}
+        <View style={styles.inputBar}>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Type a message..."
+            placeholderTextColor="rgba(148, 163, 184, 0.4)"
+            value={textInput}
+            onChangeText={setTextInput}
+            onSubmitEditing={handleTextSubmit}
+            returnKeyType="send"
+          />
+          <TouchableOpacity
+            style={[styles.sendBtn, !textInput.trim() && styles.sendBtnDisabled]}
+            onPress={handleTextSubmit}
+            disabled={!textInput.trim()}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sendBtnText}>{'\u2192'}</Text>
+          </TouchableOpacity>
+        </View>
       </KeyboardAvoidingView>
 
       {/* Voice Command Overlay */}
@@ -460,16 +552,6 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         context="chat_room"
         currentScreen="ChatRoom"
         currentGroup={group}
-      />
-
-      {/* Glasses HUD Overlay */}
-      <GlassesHUD
-        activeSpeaker={activeSpeakerId ? messages.find(m => m.senderId === activeSpeakerId)?.senderName : undefined}
-        lastMessage={lastVisible?.type === 'voice' ? '[Voice]' : lastVisible?.content}
-        lastSender={lastVisible?.isOwnMessage ? undefined : lastVisible?.senderName}
-        aiSuggestion={suggestions[0]}
-        voiceState={orbState}
-        visible={glassesMode}
       />
     </View>
   );
@@ -489,7 +571,7 @@ const styles = StyleSheet.create({
     marginTop: 100,
     fontSize: 16,
   },
-  // ── Glassmorphism Header ──
+  // ── Header ──
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -499,7 +581,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(148, 163, 184, 0.08)',
     paddingTop: 50,
-    gap: 4,
+    gap: 6,
   },
   backButton: {
     width: 38,
@@ -552,9 +634,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#34D399',
   },
-  orbContainer: {
-    marginRight: 2,
-  },
   // ── Members Panel ──
   membersPanel: {
     marginHorizontal: 12,
@@ -597,6 +676,222 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'capitalize',
+  },
+  // ── Chat List ──
+  chatList: {
+    flex: 1,
+  },
+  chatListContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+    flexGrow: 1,
+  },
+  // ── Message Bubbles (matching MainTabsScreen) ──
+  userRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 10,
+  },
+  userBubble: {
+    backgroundColor: '#312E81',
+    borderRadius: 18,
+    borderBottomRightRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    maxWidth: '78%',
+  },
+  userBubbleText: {
+    color: '#E0E7FF',
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  otherRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginBottom: 10,
+  },
+  otherBubble: {
+    backgroundColor: '#1E293B',
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    maxWidth: '85%',
+    borderLeftWidth: 3,
+    borderLeftColor: '#818CF8',
+  },
+  senderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  otherBubbleText: {
+    color: '#E2E8F0',
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  // ── Voice message inline ──
+  voiceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  voicePlayIcon: {
+    fontSize: 16,
+    color: '#E0E7FF',
+  },
+  voiceWaveArea: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    height: 24,
+    gap: 2,
+  },
+  waveBar: {
+    flex: 1,
+    borderRadius: 1.5,
+    minWidth: 3,
+  },
+  voiceDuration: {
+    fontSize: 12,
+    color: 'rgba(226, 232, 240, 0.6)',
+    minWidth: 32,
+    textAlign: 'right',
+  },
+  voiceDurationOwn: {
+    fontSize: 12,
+    color: 'rgba(224, 231, 255, 0.6)',
+    minWidth: 32,
+    textAlign: 'right',
+  },
+  whisperBadge: {
+    fontSize: 11,
+    color: '#F59E0B',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  // ── Summary Card ──
+  summaryCard: {
+    backgroundColor: 'rgba(129, 140, 248, 0.1)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(129, 140, 248, 0.2)',
+    padding: 14,
+    marginBottom: 10,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  summaryIcon: {
+    fontSize: 14,
+    color: '#818CF8',
+    marginRight: 6,
+  },
+  summaryTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#818CF8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  summaryBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#E2E8F0',
+  },
+  // ── Empty State ──
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#F1F5F9',
+    marginBottom: 4,
+  },
+  emptySubtitle: {
+    fontSize: 15,
+    color: 'rgba(148, 163, 184, 0.5)',
+  },
+  // ── Suggestion Pills ──
+  suggestionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  suggestionPill: {
+    backgroundColor: 'rgba(129, 140, 248, 0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(129, 140, 248, 0.3)',
+  },
+  suggestionPillText: {
+    color: '#818CF8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  // ── Orb Area ──
+  orbArea: {
+    alignItems: 'center',
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  orbLabel: {
+    fontSize: 13,
+    color: 'rgba(148, 163, 184, 0.5)',
+    marginTop: -8,
+    letterSpacing: 0.3,
+  },
+  // ── Input Bar ──
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingBottom: 28,
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 163, 184, 0.08)',
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    height: 42,
+    backgroundColor: 'rgba(30, 41, 59, 0.6)',
+    borderRadius: 21,
+    paddingHorizontal: 16,
+    color: '#F1F5F9',
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.12)',
+  },
+  sendBtn: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: '#818CF8',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  sendBtnDisabled: {
+    backgroundColor: 'rgba(129, 140, 248, 0.3)',
+  },
+  sendBtnText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
   },
 });
 
