@@ -138,6 +138,37 @@ async def create_group(
     return _group_to_dict(created)
 
 
+async def add_member_by_email(
+    session: AsyncSession,
+    group_id: str,
+    email: str,
+    role: str = "member",
+    status: str = "pending",
+) -> dict:
+    """Add a member to a group by email. Raises ValueError if already exists."""
+    # Check if member already exists in this group
+    existing = await session.execute(
+        select(GroupMemberModel).where(
+            GroupMemberModel.group_id == group_id,
+            GroupMemberModel.email == email,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise ValueError(f"{email} is already a member of this group")
+
+    member = GroupMemberModel(
+        group_id=group_id,
+        user_id="",  # resolved when they join
+        email=email,
+        role=role,
+        status=status,
+    )
+    session.add(member)
+    await session.commit()
+    await session.refresh(member)
+    return _member_to_dict(member)
+
+
 async def update_group(
     session: AsyncSession, group_id: str, user_id: str, updates: dict
 ) -> dict | None:

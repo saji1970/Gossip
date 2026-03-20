@@ -9,6 +9,7 @@ export type GossipIntent =
   | 'create_group'
   | 'call_group'
   | 'send_message'
+  | 'add_member'
   | 'query_groups'
   | 'query_members'
   | 'navigate'
@@ -20,7 +21,7 @@ export type GossipIntent =
 
 // ── Entity extraction ──
 
-export type EntityType = 'person' | 'group' | 'message' | 'screen';
+export type EntityType = 'person' | 'group' | 'message' | 'screen' | 'email' | 'privacy' | 'approval';
 
 export interface ExtractedEntity {
   type: EntityType;
@@ -92,6 +93,21 @@ export interface LearnedMapping {
   lastUsed: number;
 }
 
+// ── Backend NLP Result ──
+
+export interface BackendIntentEntity {
+  type: string;
+  value: string;
+}
+
+export interface BackendIntentResult {
+  intent: string;
+  entities: BackendIntentEntity[];
+  confidence: number;
+  tier: string;
+  latency_ms: number;
+}
+
 // ── Conversation History ──
 
 export type ConversationEntryRole = 'user' | 'gossip' | 'system';
@@ -140,4 +156,36 @@ export interface GossipPersonalityData {
   greetingScores: Record<string, { positive: number; total: number }>;
   fillerScores: Record<string, { positive: number; total: number }>;
   totalResponses: number;
+}
+
+// ── Pending Action (Alexa-mode confirmation flow) ──
+
+export interface PendingAction {
+  intent: GossipIntent;
+  entities: ExtractedEntity[];
+  params: Record<string, any>;
+  description: string;
+  createdAt: number;
+}
+
+// ── Action Execution (Backend command/execute response) ──
+
+export interface NextAction {
+  type: string;
+  label: string;
+  params: Record<string, any>;
+}
+
+export interface ActionExecuteResult {
+  intent: string;
+  entities: Array<{ type: string; value: string }>;
+  confidence: number;
+  tier: string;
+  success: boolean;
+  message: string;
+  actionType: string;
+  data: Record<string, any>;
+  nextActions: NextAction[];
+  confirmationRequired: boolean;
+  needsInfo: string | null;
 }

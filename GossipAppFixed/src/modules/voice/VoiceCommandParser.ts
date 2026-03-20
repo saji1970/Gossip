@@ -91,13 +91,13 @@ const commandPatterns: CommandPattern[] = [
     type: 'private_chat',
     patterns: [
       // "private chat with John", "privately message John"
-      /^(?:private\s+chat\s+with|privately\s+message|privately\s+talk\s+to|private\s+message)\s+(.+)$/i,
-      // "DM John", "direct message John"
-      /^(?:dm|direct\s+message)\s+(.+)$/i,
+      /^(?:private\s+chat\s+with|privately\s+message|privately\s+talk\s+to|private\s+message)\s+(.+?)(?:\s+in\s+.+)?$/i,
+      // "DM John", "DM John in Poker", "direct message John"
+      /^(?:dm|direct\s+message)\s+(.+?)(?:\s+in\s+.+)?$/i,
       // "speak privately with John", "talk privately with John"
-      /^(?:speak|talk|chat)\s+privately\s+(?:with|to)\s+(.+)$/i,
-      // Gen Z: "slide into DMs with John", "lowkey message John"
-      /^(?:slide\s+into\s+(?:dms?\s+(?:with|of))|lowkey\s+(?:message|text|hit\s+up))\s+(.+)$/i,
+      /^(?:speak|talk|chat)\s+privately\s+(?:with|to)\s+(.+?)(?:\s+in\s+.+)?$/i,
+      // "slide into DMs with John", "lowkey message John"
+      /^(?:slide\s+into\s+(?:dms?\s+(?:with|of))|lowkey\s+(?:message|text|hit\s+up))\s+(.+?)(?:\s+in\s+.+)?$/i,
     ],
     extractPayload: (match) => match[1].trim(),
   },
@@ -192,9 +192,10 @@ const commandPatterns: CommandPattern[] = [
   {
     type: 'open_chat',
     patterns: [
-      /^(?:open\s+chat\s+with|talk\s+to|chat\s+with|message)\s+(.+)$/i,
-      // Gen Z: "hit up John", "slide into John", "pull up on John"
-      /^(?:hit\s+up|slide\s+into|pull\s+up\s+on)\s+(.+)$/i,
+      // "chat with John", "chat with John in Poker"
+      /^(?:open\s+chat\s+with|talk\s+to|chat\s+with|message)\s+(.+?)(?:\s+in\s+.+)?$/i,
+      // "hit up John", "slide into John", "pull up on John"
+      /^(?:hit\s+up|slide\s+into|pull\s+up\s+on)\s+(.+?)(?:\s+in\s+.+)?$/i,
     ],
     extractPayload: (match) => match[1].trim(),
   },

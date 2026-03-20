@@ -35,6 +35,10 @@ PYANNOTE_AUTH_TOKEN = os.getenv("PYANNOTE_AUTH_TOKEN", "")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
+# ── Intent Classification ────────────────────────────────────────
+INTENT_LLM_TIMEOUT = float(os.getenv("INTENT_LLM_TIMEOUT", "8"))
+INTENT_LLM_TEMPERATURE = float(os.getenv("INTENT_LLM_TEMPERATURE", "0.1"))
+
 MESSAGES_COLLECTION = "messages"
 TOPICS_COLLECTION = "topic_clusters"
 SPEAKERS_COLLECTION = "speaker_profiles"
@@ -46,6 +50,13 @@ TOPIC_SIMILARITY_THRESHOLD = float(
 PERSONALITY_UPDATE_INTERVAL_HOURS = int(
     os.getenv("PERSONALITY_UPDATE_INTERVAL_HOURS", "12")
 )
+
+# ── SMTP (email invites) ────────────────────────────────────────
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+SMTP_FROM = os.getenv("SMTP_FROM", "noreply@gossipapp.com")
 
 TRAIT_BADGE_THRESHOLD = 0.5
 

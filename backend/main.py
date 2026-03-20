@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db import engine, get_session
-from backend.models.database import Base, UserModel
+from backend.models.database import Base, GroupModel, UserModel
 from backend.services import auth_service, group_service
 
 AUDIO_UPLOAD_DIR = os.getenv("AUDIO_UPLOAD_DIR", "audio_uploads")
@@ -139,6 +139,11 @@ class UpdateGroupRequest(BaseModel):
     termsAndConditions: Optional[str] = None
 
 
+class InviteMemberRequest(BaseModel):
+    email: str
+    name: str = ""
+
+
 class MemberRoleRequest(BaseModel):
     memberEmail: str
     role: str
@@ -178,6 +183,44 @@ class ReplySuggestionsRequest(BaseModel):
     topic: str
     speaker_traits: dict = {}
     count: int = 5
+
+
+class IntentClassifyRequest(BaseModel):
+    text: str
+    groups: list[dict] = []
+    currentScreen: str = "MainTabs"
+    userInfo: Optional[dict] = None
+
+
+class IntentClassifyResponse(BaseModel):
+    intent: str
+    entities: list[dict]
+    confidence: float
+    tier: str
+    latency_ms: int = 0
+
+
+class CommandExecuteRequest(BaseModel):
+    text: str
+    groups: list[dict] = []
+    currentScreen: str = "MainTabs"
+    confirmed: bool = False
+    pendingIntent: Optional[str] = None
+    pendingEntities: list[dict] = []
+
+
+class CommandExecuteResponse(BaseModel):
+    intent: str
+    entities: list[dict]
+    confidence: float
+    tier: str
+    success: bool
+    message: str
+    actionType: str
+    data: dict = {}
+    nextActions: list[dict] = []
+    confirmationRequired: bool = False
+    needsInfo: Optional[str] = None
 
 
 class ConversationSummaryRequest(BaseModel):
@@ -448,6 +491,47 @@ async def reject_member(
     return {"success": True}
 
 
+@app.post("/groups/{group_id}/invite")
+async def invite_member(
+    group_id: str,
+    req: InviteMemberRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Invite a member to a group by email. Sends invite email if SMTP is configured."""
+    from backend.services.invite_service import send_invite_email
+
+    # Verify user owns / is admin of the group
+    result = await session.execute(
+        select(GroupModel)
+        .where(GroupModel.id == group_id, GroupModel.created_by == user["uid"])
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Not authorized to invite to this group")
+
+    # Reload group for name
+    from sqlalchemy.orm import selectinload
+    result = await session.execute(
+        select(GroupModel)
+        .where(GroupModel.id == group_id)
+        .options(selectinload(GroupModel.members))
+    )
+    group = result.scalar_one()
+
+    try:
+        member = await group_service.add_member_by_email(
+            session, group_id, req.email, role="member", status="pending",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    # Try sending invite email (non-blocking — member is added regardless)
+    inviter_name = user.get("displayName") or user.get("email", "Someone")
+    email_sent = send_invite_email(req.email, group.name, inviter_name)
+
+    return {"success": True, "member": member, "emailSent": email_sent}
+
+
 # ── Message Endpoints ─────────────────────────────────────────────
 
 
@@ -584,6 +668,121 @@ async def get_audio(
         raise HTTPException(status_code=404, detail="Audio file not found")
 
     return FileResponse(audio_path, media_type="audio/mp4")
+
+
+# ── Intent Classification ─────────────────────────────────────────
+
+
+@app.post("/intent/classify", response_model=IntentClassifyResponse)
+async def classify_intent(
+    req: IntentClassifyRequest,
+    user: dict = Depends(get_current_user),
+):
+    """Classify user intent using 3-tier NLP pipeline (LLM → Embedding → Regex)."""
+    from backend.services.intent_service import classify_intent as _classify
+
+    # Extract group names and member names from context
+    group_names = [g.get("name", "") for g in req.groups if g.get("name")]
+    member_names = set()
+    for g in req.groups:
+        for m in g.get("members", []):
+            email = m.get("email", "")
+            if email:
+                # Add both email and name part
+                member_names.add(email)
+                name_part = email.split("@")[0]
+                if name_part:
+                    member_names.add(name_part)
+
+    result = await _classify(
+        text=req.text,
+        group_names=group_names,
+        member_names=list(member_names),
+        current_screen=req.currentScreen,
+    )
+
+    return IntentClassifyResponse(
+        intent=result["intent"],
+        entities=result.get("entities", []),
+        confidence=result["confidence"],
+        tier=result.get("tier", "unknown"),
+        latency_ms=result.get("latency_ms", 0),
+    )
+
+
+# ── Command Execute (Alexa-like single-shot) ─────────────────────
+
+
+@app.post("/command/execute", response_model=CommandExecuteResponse)
+async def execute_command(
+    req: CommandExecuteRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Classify intent + execute action in one shot (Alexa-like flow)."""
+    from backend.services.action_engine import execute_action
+
+    # Step 1: Classify intent (or use pending intent from confirmation flow)
+    if req.pendingIntent and req.confirmed:
+        intent = req.pendingIntent
+        entities = req.pendingEntities
+        confidence = 1.0
+        tier = "confirmed"
+    else:
+        from backend.services.intent_service import classify_intent as _classify
+
+        group_names = [g.get("name", "") for g in req.groups if g.get("name")]
+        member_names = set()
+        for g in req.groups:
+            for m in g.get("members", []):
+                email = m.get("email", "")
+                if email:
+                    member_names.add(email)
+                    name_part = email.split("@")[0]
+                    if name_part:
+                        member_names.add(name_part)
+
+        classified = await _classify(
+            text=req.text,
+            group_names=group_names,
+            member_names=list(member_names),
+            current_screen=req.currentScreen,
+        )
+        intent = classified["intent"]
+        entities = classified.get("entities", [])
+        confidence = classified["confidence"]
+        tier = classified.get("tier", "unknown")
+
+    # Step 2: Execute action if intent is actionable
+    actionable = {"create_group", "add_member", "send_message"}
+    if intent in actionable:
+        result = await execute_action(
+            session=session,
+            user_id=user["uid"],
+            user_email=user["email"],
+            user_display_name=user.get("displayName", ""),
+            intent=intent,
+            entities=entities,
+            confirmed=req.confirmed,
+        )
+        return CommandExecuteResponse(
+            intent=intent,
+            entities=entities,
+            confidence=confidence,
+            tier=tier,
+            **result,
+        )
+
+    # Non-actionable intents: return classification only
+    return CommandExecuteResponse(
+        intent=intent,
+        entities=entities,
+        confidence=confidence,
+        tier=tier,
+        success=True,
+        message="",
+        actionType=intent,
+    )
 
 
 # ── AI Endpoints ──────────────────────────────────────────────────

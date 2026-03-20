@@ -17,6 +17,7 @@ import { useApp } from '../context/AppContext';
 import { useTheme } from '../context/ThemeContext';
 import { Group } from '../utils/GroupStorage';
 import { useVoice } from '../hooks/useVoice';
+import { useVolumeButtons } from '../hooks/useVolumeButtons';
 import { useGossipBot } from '../hooks/useGossipBot';
 import { conversationHistory } from '../modules/gossip/ConversationHistory';
 import { gossipPersonality } from '../modules/gossip/GossipPersonality';
@@ -239,7 +240,7 @@ const settingsStyles = StyleSheet.create({
 const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
   const { groups, user, setUser } = useApp();
   const { voiceState, startListening, stopListening, lastResult } = useVoice();
-  const { processInput } = useGossipBot();
+  const { processInput, backendAvailable } = useGossipBot();
   const [messages, setMessages] = useState<ConversationEntry[]>([]);
   const [textInput, setTextInput] = useState('');
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -343,7 +344,7 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
 
   const handleCommand = (type: string, payload: string) => {
     switch (type) {
-      case 'navigate':
+      case 'navigate': {
         if (payload === 'logout') {
           Alert.alert('Log Out', 'Are you sure?', [
             { text: 'Cancel', style: 'cancel' },
@@ -353,15 +354,35 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
           setSettingsVisible(true);
         } else if (payload === 'chat' || payload === 'group' || payload === 'home') {
           // Already home
+        } else {
+          // Try parsing JSON payload for InviteMembers / other screens
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.screen === 'InviteMembers' && parsed.groupId) {
+              const targetGroup = groups.find(g => g.id === parsed.groupId);
+              if (targetGroup) {
+                navigation?.navigate('InviteMembers', { group: targetGroup });
+              }
+            }
+          } catch {
+            // Not JSON — ignore
+          }
         }
         break;
+      }
       case 'create_group': {
         let params: any = undefined;
         if (payload) {
           try {
             const parsed = JSON.parse(payload);
-            params = { groupName: parsed.name || '', privacy: parsed.privacy, requireApproval: parsed.requireApproval };
-          } catch { params = { groupName: payload }; }
+            params = {
+              groupName: parsed.name || '',
+              privacy: parsed.privacy,
+              requireApproval: parsed.requireApproval,
+            };
+          } catch {
+            params = { groupName: payload };
+          }
         }
         navigation?.navigate('CreateGroup', params);
         break;
@@ -390,16 +411,27 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
         }
         break;
       }
+      case 'confirm_action':
+        // Confirmation is handled by GossipBot.handlePendingAction
+        // Just re-process the yes/no through the bot
+        handleUserInput(payload);
+        break;
     }
   };
 
-  const handleOrbPress = () => {
+  const handleOrbPress = useCallback(() => {
     if (voiceState === 'listening') {
       stopListening();
     } else {
       startListening();
     }
-  };
+  }, [voiceState, startListening, stopListening]);
+
+  // ── Volume button: long press volume down to toggle voice ──
+  useVolumeButtons({
+    onVolumeDownLongPress: handleOrbPress,
+    enabled: true,
+  });
 
   const handleGroupPillPress = (group: Group) => {
     navigation?.navigate('ChatRoom', { group });
@@ -464,7 +496,14 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
       <View style={styles.container}>
         {/* ── Header ── */}
         <View style={styles.topBar}>
-          <Text style={styles.headerTitle}>Gossip</Text>
+          <View style={styles.headerLeft}>
+            <Text style={styles.headerTitle}>Gossip</Text>
+            {backendAvailable && (
+              <View style={styles.aiBadge}>
+                <Text style={styles.aiBadgeText}>AI</Text>
+              </View>
+            )}
+          </View>
           <TouchableOpacity
             style={styles.settingsBtn}
             onPress={() => setSettingsVisible(true)}
@@ -530,7 +569,7 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
             onPress={handleOrbPress}
           />
           <Text style={styles.orbLabel}>
-            {voiceState === 'listening' ? 'Listening...' : 'Tap to talk'}
+            {voiceState === 'listening' ? 'Listening...' : 'Tap to command'}
           </Text>
         </View>
 
@@ -538,7 +577,7 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
         <View style={styles.inputBar}>
           <TextInput
             style={styles.textInput}
-            placeholder="Type a message..."
+            placeholder="Tell Gossip what to do..."
             placeholderTextColor="rgba(148, 163, 184, 0.4)"
             value={textInput}
             onChangeText={setTextInput}
@@ -581,6 +620,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(129, 140, 248, 0.1)',
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerTitle: {
     fontSize: 24,
     fontWeight: '800',
@@ -589,6 +633,20 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(129, 140, 248, 0.5)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 12,
+  },
+  aiBadge: {
+    backgroundColor: 'rgba(52, 211, 153, 0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.4)',
+  },
+  aiBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#34D399',
+    letterSpacing: 0.5,
   },
   settingsBtn: {
     width: 40, height: 40, borderRadius: 20,

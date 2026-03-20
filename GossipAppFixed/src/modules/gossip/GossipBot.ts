@@ -4,6 +4,9 @@ import {
   GossipResponse,
   GossipIntent,
   ExtractedEntity,
+  BackendIntentResult,
+  PendingAction,
+  ActionExecuteResult,
 } from './types';
 import { learningStore } from './LearningStore';
 import { conversationState } from './ConversationState';
@@ -13,9 +16,17 @@ import { gossipPersonality } from './GossipPersonality';
 import { findMember, findGroup } from './ContextBuilder';
 import * as IntentResolver from './IntentResolver';
 import * as ResponseBuilder from './ResponseBuilder';
+import * as api from '../../services/api';
+
+/** Intents that should be executed via backend action engine. */
+const ACTIONABLE_INTENTS = new Set<string>([
+  'create_group',
+  'add_member',
+]);
 
 class GossipBot {
   private initialized = false;
+  private pendingAction: PendingAction | null = null;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -24,7 +35,7 @@ class GossipBot {
     await userPersonalityProfile.load();
     await gossipPersonality.load();
     this.initialized = true;
-    console.log('[GossipBot] Initialized with personality modules');
+    console.log('[GossipBot] Initialized with action engine');
   }
 
   /**
@@ -46,7 +57,14 @@ class GossipBot {
     const isPositive = gossipPersonality.detectPositive(trimmed);
     const isFrustrated = gossipPersonality.detectFrustration(trimmed);
 
-    // 1. If there's a pending follow-up, handle it
+    // 0. If there's a pending action needing confirmation, check for yes/no
+    if (this.pendingAction) {
+      const response = await this.handlePendingAction(trimmed, context);
+      this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
+      return response;
+    }
+
+    // 1. If there's a pending follow-up (clarification options), handle it
     const pending = conversationState.getPending();
     if (pending && pending.options.length > 0) {
       const response = await this.handleFollowUp(trimmed, context);
@@ -54,7 +72,30 @@ class GossipBot {
       return response;
     }
 
-    // 2. Try existing regex parser as fast path
+    // 2. Try backend command/execute (single-shot: classify + execute)
+    const backendActionResult = await this.tryBackendCommandExecute(trimmed, context);
+    if (backendActionResult) {
+      const response = this.handleActionResult(backendActionResult, trimmed);
+      userPersonalityProfile.recordCommandUsage(backendActionResult.intent as GossipIntent);
+      this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
+      return response;
+    }
+
+    // 3. Try backend NLP classification only (4s timeout)
+    const backendResult = await this.tryBackendNLP(trimmed, context);
+    if (backendResult) {
+      const intent = backendResult.intent as GossipIntent;
+      const entities: ExtractedEntity[] = backendResult.entities.map(e => ({
+        type: e.type as ExtractedEntity['type'],
+        value: e.value,
+      }));
+      userPersonalityProfile.recordCommandUsage(intent);
+      const response = this.resolveIntent(trimmed, intent, entities, context);
+      this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
+      return response;
+    }
+
+    // 4. Try existing regex parser as fast path
     const regexCmd = parseCommand(trimmed);
     if (regexCmd.type !== 'unknown' && regexCmd.confidence >= 0.7) {
       const resolved = this.checkAndResolve(regexCmd, context);
@@ -70,27 +111,302 @@ class GossipBot {
       return response;
     }
 
-    // 3. Try fuzzy intent resolver
+    // 5. Try fuzzy intent resolver (with compound entity detection)
     const intentResult = IntentResolver.resolve(trimmed);
-    if (intentResult.confidence >= 0.5) {
+    if (intentResult.confidence >= 0.7) {
+      // Merge compound entities (e.g. "create group X and add Y")
+      const compoundEntities = IntentResolver.extractCompoundEntities(trimmed, intentResult.intent);
+      const allEntities = [...intentResult.entities, ...compoundEntities];
+
+      // If actionable and we have enough data, try direct execution
+      if (ACTIONABLE_INTENTS.has(intentResult.intent)) {
+        const actionResponse = await this.tryLocalActionExecution(
+          trimmed, intentResult.intent, allEntities, context,
+        );
+        if (actionResponse) {
+          this.recordExchangeFromResponse(actionResponse, !isFrustrated, isPositive);
+          return actionResponse;
+        }
+      }
+
       userPersonalityProfile.recordCommandUsage(intentResult.intent);
       const response = this.resolveIntent(
         trimmed,
         intentResult.intent,
-        intentResult.entities,
+        allEntities,
         context,
       );
       this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
       return response;
     }
 
-    // 4. Casual chat fallback instead of generic "unknown"
+    // 6. Casual chat fallback
     const casualResponse = ResponseBuilder.buildCasualResponse(
       trimmed,
       gossipPersonality.getMood(),
     );
     this.recordExchangeFromResponse(casualResponse, !isFrustrated, isPositive);
     return casualResponse;
+  }
+
+  /**
+   * Handle a yes/no response to a pending action confirmation.
+   */
+  private async handlePendingAction(
+    text: string,
+    context: GossipContext,
+  ): Promise<GossipResponse> {
+    const action = this.pendingAction!;
+    const lower = text.toLowerCase().trim();
+    const isYes = /^(yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|confirm|send it|absolutely|please)$/i.test(lower);
+    const isNo = /^(no|nope|nah|cancel|nevermind|never mind|forget it|stop)$/i.test(lower);
+
+    if (isNo) {
+      this.pendingAction = null;
+      return { type: 'info', message: 'No problem, cancelled!' };
+    }
+
+    if (isYes) {
+      this.pendingAction = null;
+
+      // Execute the confirmed action via backend
+      try {
+        const groups = context.groups.map(g => ({
+          name: g.name,
+          members: g.members.map(m => ({ email: m.email })),
+        }));
+
+        const result = await Promise.race([
+          api.executeCommand(
+            '', groups, context.currentScreen, true,
+            action.intent,
+            action.entities.map(e => ({ type: e.type, value: e.value })),
+          ),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 6000)),
+        ]);
+
+        if (result && result.success) {
+          return ResponseBuilder.buildActionResult(result as ActionExecuteResult);
+        }
+
+        if (result && !result.success) {
+          return { type: 'info', message: result.message || 'Something went wrong.' };
+        }
+      } catch (err) {
+        console.log('[GossipBot] Confirmed action failed:', err);
+      }
+
+      // Fallback: execute locally via old flow
+      return this.resolveIntent(
+        action.description,
+        action.intent,
+        action.entities,
+        context,
+      );
+    }
+
+    // Not a clear yes/no — re-prompt
+    return {
+      type: 'clarify',
+      message: `Just to confirm — ${action.description} Yes or no?`,
+      options: [
+        { label: 'Yes', description: 'Confirm', command: { type: 'confirm_action', payload: 'yes', rawText: 'yes', confidence: 1 } },
+        { label: 'No', description: 'Cancel', command: { type: 'confirm_action', payload: 'no', rawText: 'no', confidence: 1 } },
+      ],
+    };
+  }
+
+  /**
+   * Try the backend /command/execute endpoint (classify + execute in one shot).
+   * Returns null if backend is unavailable or intent is non-actionable.
+   */
+  private async tryBackendCommandExecute(
+    text: string,
+    context: GossipContext,
+  ): Promise<ActionExecuteResult | null> {
+    try {
+      const groups = context.groups.map(g => ({
+        name: g.name,
+        members: g.members.map(m => ({ email: m.email })),
+      }));
+
+      const result = await Promise.race([
+        api.executeCommand(text, groups, context.currentScreen),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
+      ]);
+
+      if (!result) {
+        console.log('[GossipBot] Backend command/execute timed out');
+        return null;
+      }
+
+      // Only use this for actionable intents that were actually executed
+      if (!ACTIONABLE_INTENTS.has(result.intent)) {
+        return null;
+      }
+
+      if (result.confidence < 0.6) {
+        return null;
+      }
+
+      console.log(`[GossipBot] Backend execute: ${result.intent} (${result.confidence}) via ${result.tier} — ${result.success ? 'OK' : 'FAIL'}`);
+      return result as ActionExecuteResult;
+    } catch (err) {
+      console.log('[GossipBot] Backend command/execute unavailable:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Handle an ActionExecuteResult — convert to GossipResponse.
+   * Sets up pending action if confirmation is needed.
+   */
+  private handleActionResult(
+    result: ActionExecuteResult,
+    rawText: string,
+  ): GossipResponse {
+    // If the backend needs more info, set up a follow-up
+    if (result.needsInfo) {
+      conversationState.setPending(rawText, result.intent as GossipIntent, []);
+      return { type: 'clarify', message: result.message, options: [] };
+    }
+
+    // If confirmation is required, store pending action
+    if (result.confirmationRequired) {
+      this.pendingAction = {
+        intent: result.intent as GossipIntent,
+        entities: result.entities.map(e => ({
+          type: e.type as ExtractedEntity['type'],
+          value: e.value,
+        })),
+        params: result.data,
+        description: result.message,
+        createdAt: Date.now(),
+      };
+      return ResponseBuilder.buildConfirmation(result.message);
+    }
+
+    // Action completed — show result with next action suggestions
+    return ResponseBuilder.buildActionResult(result);
+  }
+
+  /**
+   * Try executing an action locally via API calls when backend /command/execute
+   * isn't available but we have enough entities.
+   */
+  private async tryLocalActionExecution(
+    rawText: string,
+    intent: GossipIntent,
+    entities: ExtractedEntity[],
+    context: GossipContext,
+  ): Promise<GossipResponse | null> {
+    if (intent === 'create_group') {
+      const groupEntity = entities.find(e => e.type === 'group');
+      if (!groupEntity) return null;
+
+      const privacy = entities.find(e => e.type === 'privacy')?.value || 'private';
+      const approval = entities.find(e => e.type === 'approval')?.value === 'true';
+      const email = entities.find(e => e.type === 'email')?.value;
+      const person = entities.find(e => e.type === 'person')?.value;
+
+      const members: Array<{ email: string; role?: string; status?: string }> = [];
+      if (email) {
+        members.push({ email, role: 'member', status: 'pending' });
+      }
+
+      try {
+        const group = await api.createGroup({
+          name: groupEntity.value,
+          privacy,
+          requireApproval: approval,
+          members,
+        });
+
+        let message = `Group "${group.name}" created!`;
+
+        // If member was added inline, offer to send invite
+        if (email) {
+          const label = person || email;
+          message += ` ${label} added.`;
+
+          try {
+            const inviteResult = await api.inviteMember(group.id, email, person);
+            if (inviteResult.emailSent) {
+              message += ' Invite email sent!';
+            }
+          } catch {
+            // Invite failed, member still added
+          }
+        }
+
+        // Build next action options
+        const options: import('./types').GossipOption[] = [
+          {
+            label: 'Add members',
+            description: `Add members to ${group.name}`,
+            command: {
+              type: 'navigate',
+              payload: JSON.stringify({ screen: 'InviteMembers', groupId: group.id, groupName: group.name }),
+              rawText: 'add members',
+              confidence: 1,
+            },
+          },
+          {
+            label: `Open ${group.name}`,
+            description: `Go to ${group.name}`,
+            command: {
+              type: 'open_chat',
+              payload: JSON.stringify({ groupId: group.id }),
+              rawText: `open ${group.name}`,
+              confidence: 1,
+            },
+          },
+        ];
+
+        return {
+          type: 'clarify',
+          message,
+          options,
+        };
+      } catch (err: any) {
+        return {
+          type: 'info',
+          message: err?.message || 'Failed to create group.',
+        };
+      }
+    }
+
+    if (intent === 'add_member') {
+      const email = entities.find(e => e.type === 'email')?.value;
+      const person = entities.find(e => e.type === 'person')?.value;
+      const groupEntity = entities.find(e => e.type === 'group');
+
+      if (!email || !groupEntity) return null;
+
+      // Find matching group
+      const matches = findGroup(groupEntity.value, context.groups);
+      if (matches.length === 0) {
+        return { type: 'info', message: `Couldn't find a group called "${groupEntity.value}".` };
+      }
+
+      const group = matches[0].group;
+      const label = person || email;
+
+      // Set up confirmation
+      this.pendingAction = {
+        intent: 'add_member',
+        entities,
+        params: { groupId: group.id, groupName: group.name, email, person },
+        description: `Add ${label} to ${group.name} and send an invite?`,
+        createdAt: Date.now(),
+      };
+
+      return ResponseBuilder.buildConfirmation(
+        `Add ${label} to ${group.name} and send an invite?`,
+      );
+    }
+
+    return null;
   }
 
   /**
@@ -193,14 +509,69 @@ class GossipBot {
           conversationState.setPending(rawText, 'create_group', []);
           return resp;
         }
+
+        // Build payload with all extracted properties
+        const privacy = entities.find(e => e.type === 'privacy')?.value;
+        const approval = entities.find(e => e.type === 'approval')?.value;
+        const payloadObj: Record<string, any> = { name: groupEntity.value };
+        if (privacy) payloadObj.privacy = privacy;
+        if (approval) payloadObj.requireApproval = approval === 'true';
+
         return ResponseBuilder.buildExecute(
           `Creating group "${groupEntity.value}"`,
           {
             type: 'create_group',
-            payload: groupEntity.value,
+            payload: JSON.stringify(payloadObj),
             rawText,
             confidence: 1,
           },
+        );
+      }
+
+      case 'add_member': {
+        const email = entities.find(e => e.type === 'email')?.value;
+        const person = entities.find(e => e.type === 'person')?.value;
+        const groupEntity = entities.find(e => e.type === 'group');
+
+        if (!email) {
+          conversationState.setPending(rawText, 'add_member', []);
+          return {
+            type: 'clarify',
+            message: `What's ${person || 'their'} email address?`,
+            options: [],
+          };
+        }
+
+        if (!groupEntity) {
+          // Ask which group
+          if (context.groups.length === 0) {
+            return { type: 'info', message: "You don't have any groups yet." };
+          }
+          const options = context.groups.slice(0, 4).map(g => ({
+            label: g.name,
+            description: `Add to ${g.name}`,
+            command: {
+              type: 'navigate' as const,
+              payload: JSON.stringify({ screen: 'InviteMembers', groupId: g.id, email, person }),
+              rawText: `add ${person || email} to ${g.name}`,
+              confidence: 1,
+            },
+          }));
+          conversationState.setPending(rawText, 'add_member', options);
+          return { type: 'clarify', message: 'Which group?', options };
+        }
+
+        // We have everything — set up confirmation
+        const label = person || email;
+        this.pendingAction = {
+          intent: 'add_member',
+          entities,
+          params: { groupName: groupEntity.value, email, person },
+          description: `Add ${label} to ${groupEntity.value} and send an invite?`,
+          createdAt: Date.now(),
+        };
+        return ResponseBuilder.buildConfirmation(
+          `Add ${label} to ${groupEntity.value} and send an invite?`,
         );
       }
 
@@ -236,9 +607,9 @@ class GossipBot {
         if (context.groups.length === 0) {
           return { type: 'info', message: "You don't have any groups yet" };
         }
-        const resp = ResponseBuilder.buildSendMessageAmbiguity(msg, context.groups);
-        conversationState.setPending(rawText, 'send_message', resp.options || []);
-        return resp;
+        const sendResp = ResponseBuilder.buildSendMessageAmbiguity(msg, context.groups);
+        conversationState.setPending(rawText, 'send_message', sendResp.options || []);
+        return sendResp;
       }
 
       case 'query_groups': {
@@ -377,11 +748,29 @@ class GossipBot {
         `Creating group "${name}"`,
         {
           type: 'create_group',
-          payload: name,
+          payload: JSON.stringify({ name }),
           rawText: `create group ${name}`,
           confidence: 1,
         },
       );
+    }
+
+    // Special case: pending add_member with no options (waiting for email)
+    if (pending.intent === 'add_member' && pending.options.length === 0) {
+      const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
+      if (emailMatch) {
+        conversationState.reset();
+        // Re-process with the email now available
+        return this.processInput(
+          `${pending.originalText} email ${emailMatch[0]}`,
+          context,
+        );
+      }
+      return {
+        type: 'clarify',
+        message: "I need an email address. What's their email?",
+        options: [],
+      };
     }
 
     const matchIdx = ResponseBuilder.resolveFollowUp(text, pending.options);
@@ -397,7 +786,7 @@ class GossipBot {
 
       return {
         type: 'execute',
-        message: `${option.label} — gotchu!`,
+        message: `${option.label} — got it!`,
         command: option.command,
       };
     }
@@ -409,8 +798,46 @@ class GossipBot {
     };
   }
 
+  /**
+   * Try backend NLP classification with a 4-second timeout.
+   * Returns null if backend is unavailable, slow, or low confidence.
+   */
+  private async tryBackendNLP(
+    text: string,
+    context: GossipContext,
+  ): Promise<BackendIntentResult | null> {
+    try {
+      const groups = context.groups.map(g => ({
+        name: g.name,
+        members: g.members.map(m => ({ email: m.email })),
+      }));
+
+      const result = await Promise.race([
+        api.classifyIntent(text, groups, context.currentScreen),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]);
+
+      if (!result) {
+        console.log('[GossipBot] Backend NLP timed out');
+        return null;
+      }
+
+      if (result.confidence < 0.6) {
+        console.log(`[GossipBot] Backend NLP low confidence: ${result.intent} (${result.confidence})`);
+        return null;
+      }
+
+      console.log(`[GossipBot] Backend NLP: ${result.intent} (${result.confidence}) via ${result.tier} in ${result.latency_ms}ms`);
+      return result;
+    } catch (err) {
+      console.log('[GossipBot] Backend NLP unavailable:', err);
+      return null;
+    }
+  }
+
   reset(): void {
     conversationState.reset();
+    this.pendingAction = null;
   }
 
   /** Generate a human-readable description for a command. */

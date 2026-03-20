@@ -210,6 +210,23 @@ export async function rejectMember(
   }, true);
 }
 
+// ── Invite endpoint ───────────────────────────────────────────────
+
+export async function inviteMember(
+  groupId: string,
+  email: string,
+  name?: string,
+): Promise<{ success: boolean; emailSent: boolean }> {
+  return request<{ success: boolean; emailSent: boolean }>(
+    `/groups/${groupId}/invite`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ email, name: name || '' }),
+    },
+    true,
+  );
+}
+
 // ── Message types ─────────────────────────────────────────────────
 
 export interface ChatMessage {
@@ -424,6 +441,66 @@ export async function getConversationSummary(
     body: JSON.stringify({ groupId, messageCount }),
   }, true);
 }
+
+// ── Intent classification ─────────────────────────────────────────
+
+interface IntentClassifyResponse {
+  intent: string;
+  entities: Array<{ type: string; value: string }>;
+  confidence: number;
+  tier: string;
+  latency_ms: number;
+}
+
+export async function classifyIntent(
+  text: string,
+  groups: Array<{ name: string; members: Array<{ email: string }> }>,
+  currentScreen: string = 'MainTabs',
+): Promise<IntentClassifyResponse> {
+  return request<IntentClassifyResponse>('/intent/classify', {
+    method: 'POST',
+    body: JSON.stringify({ text, groups, currentScreen }),
+  }, true);
+}
+
+// ── Command execution (Alexa-like single-shot) ───────────────────
+
+interface CommandExecuteResponse {
+  intent: string;
+  entities: Array<{ type: string; value: string }>;
+  confidence: number;
+  tier: string;
+  success: boolean;
+  message: string;
+  actionType: string;
+  data: Record<string, any>;
+  nextActions: Array<{ type: string; label: string; params: Record<string, any> }>;
+  confirmationRequired: boolean;
+  needsInfo: string | null;
+}
+
+export async function executeCommand(
+  text: string,
+  groups: Array<{ name: string; members: Array<{ email: string }> }>,
+  currentScreen: string = 'MainTabs',
+  confirmed: boolean = false,
+  pendingIntent?: string,
+  pendingEntities?: Array<{ type: string; value: string }>,
+): Promise<CommandExecuteResponse> {
+  return request<CommandExecuteResponse>('/command/execute', {
+    method: 'POST',
+    body: JSON.stringify({
+      text,
+      groups,
+      currentScreen,
+      confirmed,
+      pendingIntent: pendingIntent || null,
+      pendingEntities: pendingEntities || [],
+    }),
+  }, true);
+}
+
+export type { CommandExecuteResponse };
 
 export async function healthCheck(): Promise<boolean> {
   try {

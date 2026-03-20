@@ -1,4 +1,4 @@
-import { GossipResponse, GossipOption, GossipMood, MemberSearchResult, GroupSearchResult } from './types';
+import { GossipResponse, GossipOption, GossipMood, MemberSearchResult, GroupSearchResult, NextAction, ActionExecuteResult } from './types';
 import { VoiceCommand } from '../voice/VoiceCommandParser';
 import { Group } from '../../utils/GroupStorage';
 import { gossipPersonality } from './GossipPersonality';
@@ -76,7 +76,7 @@ export function buildSingleGroupChat(
   const g = member.groups[0];
   return {
     type: 'execute',
-    message: trimForStyle(`${affirmation()}! Opening ${g.name} to chat with ${name}`),
+    message: trimForStyle(`Opening ${g.name} to chat with ${name}`),
     command: {
       type: 'open_chat',
       payload: JSON.stringify({ groupId: g.id, personEmail: member.email }),
@@ -115,7 +115,7 @@ export function buildGroupAmbiguity(
 export function buildMissingGroupName(): GossipResponse {
   return {
     type: 'clarify',
-    message: trimForStyle(`${affirmation()}! What would you like to call the group?`),
+    message: 'What would you like to call the group?',
     options: [],
   };
 }
@@ -205,7 +205,7 @@ export function buildMaxTurns(): GossipResponse {
 export function buildExecute(msg: string, command: VoiceCommand): GossipResponse {
   return {
     type: 'execute',
-    message: trimForStyle(`${affirmation()}! ${msg}`),
+    message: trimForStyle(msg),
     command,
   };
 }
@@ -214,17 +214,25 @@ export function buildHelp(): GossipResponse {
   return {
     type: 'info',
     message: trimForStyle(
-      `${greeting()}! Here's what I can do:\n` +
-      `- "Chat with [name]" / "DM [name]"\n` +
-      `- "Create group [name]"\n` +
-      `- "Call" / "Hop on call"\n` +
-      `- "Send [message]" / "Drop [message]"\n` +
-      `- "What groups is [name] in?"\n` +
-      `- "Who's in [group]?"\n` +
-      `- "Go to [screen]"\n` +
-      `- "Show my groups"\n` +
-      `- Or just chat with me!`,
+      `Here's what I can do:\n` +
+      `- "Create a private group [name]" — new group\n` +
+      `- "Create group [name] and add [person] email [email]"\n` +
+      `- "Add [name] to [group] email [email]" — invite member\n` +
+      `- "Chat with [name]" — open a conversation\n` +
+      `- "DM [name]" — private message\n` +
+      `- "Call [group]" — start a call\n` +
+      `- "Send [message] in [group]"\n` +
+      `- "Who's in [group]?" — list members\n` +
+      `- "Show my groups" — see all groups\n` +
+      `- "Settings" / "Log out"`,
     ),
+  };
+}
+
+export function buildAssistantHelp(): GossipResponse {
+  return {
+    type: 'info',
+    message: 'What can I help you with? Try "send a message", "call a group", or "show my groups".',
   };
 }
 
@@ -234,7 +242,7 @@ export function buildCasualResponse(text: string, mood: GossipMood): GossipRespo
   const lower = text.toLowerCase();
 
   // Greeting responses
-  if (/how are you|how('s| is) it going|what'?s up|wassup|sup/i.test(lower)) {
+  if (/how are you|how('s| is) it going|what'?s up|wassup|sup\b/i.test(lower)) {
     const moodResponses: Record<GossipMood, string[]> = {
       chill: ['All good! What about you?', 'Doing well, how about you?', 'Pretty good!'],
       hyped: ['I\'m great! What are we doing today?', 'Feeling amazing, let\'s chat!', 'Ready to go! What\'s up?'],
@@ -249,15 +257,15 @@ export function buildCasualResponse(text: string, mood: GossipMood): GossipRespo
   }
 
   // Thanks
-  if (/thanks|thank you|thx|ty/i.test(lower)) {
+  if (/thanks|thank you|thx|ty\b/i.test(lower)) {
     const responses = [
-      'Anytime!', 'No problem!', 'Always got your back', `${affirmation()}!`,
+      'Anytime!', 'No problem!', 'Always got your back!', 'Happy to help!',
     ];
     return { type: 'info', message: pick(responses) };
   }
 
   // Laughter
-  if (/lol|haha|lmao|rofl|dead/i.test(lower)) {
+  if (/lol|haha|hehe|lmao|rofl/i.test(lower)) {
     const responses = [
       'Haha, glad you\'re having fun!', 'Ha! Right?', 'That\'s funny!',
     ];
@@ -265,30 +273,78 @@ export function buildCasualResponse(text: string, mood: GossipMood): GossipRespo
   }
 
   // Goodbye
-  if (/bye|see ya|later|gotta go|peace out/i.test(lower)) {
+  if (/bye|see ya|later|gotta go|peace out|take care/i.test(lower)) {
     const responses = [
-      'Catch you later!', 'See you! I\'ll be here', 'Bye! Don\'t be a stranger',
+      'Catch you later!', 'See you! I\'ll be here.', 'Bye! Don\'t be a stranger.',
     ];
     return { type: 'info', message: pick(responses) };
   }
 
   // Good morning/night
-  if (/good morning|morning/i.test(lower)) {
-    return { type: 'info', message: trimForStyle(`Morning! Ready to start the day?`) };
+  if (/good morning|^morning\b/i.test(lower)) {
+    return { type: 'info', message: trimForStyle('Morning! Ready to start the day?') };
   }
-  if (/good night|gn|night/i.test(lower)) {
-    return { type: 'info', message: 'Night! Sleep well, I\'ll be here when you get back' };
+  if (/good night|^gn\b|^night\b/i.test(lower)) {
+    return { type: 'info', message: 'Night! Sleep well, I\'ll be here when you get back.' };
   }
 
-  // Generic conversational fallback
-  const fallbacks: Record<GossipMood, string[]> = {
-    chill: ['Hmm, tell me more', 'I hear you', 'Interesting'],
-    hyped: ['That\'s interesting! Tell me more!', 'Really? Tell me about it!', 'Let\'s talk about it!'],
-    sassy: ['Oh? Do tell', 'Interesting...', 'Hmm, go on'],
-    supportive: ['I\'m listening! Go on', 'That sounds cool, tell me more', 'I\'m here for you'],
-    curious: ['What do you mean by that?', 'Tell me more!', 'Hmm, that\'s interesting...'],
-  };
-  return { type: 'info', message: pick(fallbacks[mood]) };
+  // Affirmation / acknowledgment
+  if (/sounds good|that works|that's fine|no problem|no worries|got it|i see|makes sense|of course|alright then/i.test(lower)) {
+    const responses = [
+      'Great! Anything else I can help with?',
+      'Sounds good! Let me know if you need anything.',
+      'Perfect! I\'m here if you need me.',
+    ];
+    return { type: 'info', message: pick(responses) };
+  }
+
+  // Short single-word affirmatives
+  if (/^(ok|okay|k|yeah|yep|yup|yes|sure|right|true|same|exactly|definitely|absolutely|cool|nice|great|perfect|awesome|sweet|fine|alright|wow|amazing|interesting)$/i.test(lower)) {
+    const responses = [
+      'What can I help you with?',
+      'Need me to do anything?',
+      'Ready for your next command.',
+      'What would you like to do?',
+    ];
+    return { type: 'info', message: pick(responses) };
+  }
+
+  // Questions about the bot
+  if (/who are you|what's your name|what are you/i.test(lower)) {
+    return {
+      type: 'info',
+      message: 'I\'m Gossip, your chat assistant! I can help you message friends, create groups, make calls, and more. Just ask!',
+    };
+  }
+
+  // Emotional states
+  if (/i'm bored|i'm tired|bored|tired/i.test(lower)) {
+    const responses = [
+      'Want to check in on your groups? Say "show my groups".',
+      'How about chatting with a friend? Just say "chat with [name]".',
+      'I\'m here to keep you company! Want to do anything?',
+    ];
+    return { type: 'info', message: pick(responses) };
+  }
+
+  // Never mind / whatever
+  if (/never mind|forget it|whatever|nah|nope/i.test(lower)) {
+    const responses = [
+      'No worries! I\'m here whenever you need me.',
+      'All good! Just let me know.',
+      'No problem! I\'ll be right here.',
+    ];
+    return { type: 'info', message: pick(responses) };
+  }
+
+  // Generic fallback — suggest available actions
+  const fallbacks = [
+    'What can I help you with? Try "send a message", "call a group", or "show my groups".',
+    'I can send messages, make calls, create groups, and more. What do you need?',
+    'Not sure what to do with that. Try "help" to see what I can do.',
+    'I\'m your assistant! Tell me what you need — messages, calls, groups, or settings.',
+  ];
+  return { type: 'info', message: pick(fallbacks) };
 }
 
 export function buildGroupsList(groups: Group[]): GossipResponse {
@@ -312,7 +368,7 @@ export function buildGroupsList(groups: Group[]): GossipResponse {
 
   return {
     type: 'clarify',
-    message: trimForStyle(`${greeting()}! Here are your groups. Tap one to open:`),
+    message: trimForStyle('Here are your groups. Tap one to open:'),
     options,
   };
 }
@@ -322,25 +378,25 @@ export function buildSettingsAction(action: string): GossipResponse {
     case 'logout':
       return {
         type: 'execute',
-        message: trimForStyle(`${affirmation()}! Logging you out...`),
+        message: 'Logging you out...',
         command: { type: 'navigate', payload: 'logout', rawText: 'log out', confidence: 1 },
       };
     case 'theme':
       return {
         type: 'execute',
-        message: trimForStyle(`${affirmation()}! Opening theme settings...`),
+        message: 'Opening theme settings',
         command: { type: 'navigate', payload: 'settings_theme', rawText: 'change theme', confidence: 1 },
       };
     case 'profile':
       return {
         type: 'execute',
-        message: trimForStyle(`${affirmation()}! Opening profile settings...`),
+        message: 'Opening profile settings',
         command: { type: 'navigate', payload: 'settings_profile', rawText: 'edit profile', confidence: 1 },
       };
     default:
       return {
         type: 'execute',
-        message: trimForStyle(`${affirmation()}! Opening settings...`),
+        message: 'Opening settings',
         command: { type: 'navigate', payload: 'setting', rawText: 'open settings', confidence: 1 },
       };
   }
@@ -348,14 +404,108 @@ export function buildSettingsAction(action: string): GossipResponse {
 
 export function buildWelcomeBack(userName: string, mood: GossipMood): string {
   const name = userName.split('@')[0];
-  const welcomes: Record<GossipMood, string[]> = {
-    chill: [`${greeting()} ${name}! How's it going?`, `Hey ${name}, what are we doing today?`],
-    hyped: [`${greeting()} ${name}!! Let's go!`, `${name}! Great to see you!`],
-    sassy: [`Oh look who decided to show up, ${name}!`, `${name}! Finally. I was getting bored.`],
-    supportive: [`${greeting()} ${name}! I'm here to help!`, `Welcome back ${name}! What can I do for you?`],
-    curious: [`${greeting()} ${name}! What's on your mind?`, `${name}! What's new?`],
+  const welcomes = [
+    `Hey ${name}! What can I do for you?`,
+    `Welcome back ${name}! How can I help?`,
+    `Hi ${name}! Ready when you are.`,
+  ];
+  return pick(welcomes);
+}
+
+// ── Action result builders (Alexa-like post-action flow) ──
+
+export function buildActionResult(result: ActionExecuteResult): GossipResponse {
+  const options = nextActionsToOptions(result.nextActions);
+
+  if (result.confirmationRequired) {
+    return {
+      type: 'clarify',
+      message: trimForStyle(result.message),
+      options: [
+        {
+          label: 'Yes',
+          description: 'Confirm action',
+          command: { type: 'confirm_action', payload: 'yes', rawText: 'yes', confidence: 1 },
+        },
+        {
+          label: 'No',
+          description: 'Cancel',
+          command: { type: 'confirm_action', payload: 'no', rawText: 'no', confidence: 1 },
+        },
+      ],
+    };
+  }
+
+  if (!result.success) {
+    return { type: 'info', message: trimForStyle(result.message), options };
+  }
+
+  return {
+    type: options.length > 0 ? 'clarify' : 'info',
+    message: trimForStyle(result.message),
+    options,
   };
-  return pick(welcomes[mood]);
+}
+
+export function buildConfirmation(description: string): GossipResponse {
+  return {
+    type: 'clarify',
+    message: trimForStyle(description),
+    options: [
+      {
+        label: 'Yes, do it',
+        description: 'Confirm',
+        command: { type: 'confirm_action', payload: 'yes', rawText: 'yes', confidence: 1 },
+      },
+      {
+        label: 'No, cancel',
+        description: 'Cancel',
+        command: { type: 'confirm_action', payload: 'no', rawText: 'no', confidence: 1 },
+      },
+    ],
+  };
+}
+
+export function buildNeedsInfo(field: string, prompt: string): GossipResponse {
+  return {
+    type: 'clarify',
+    message: trimForStyle(prompt),
+    options: [],
+  };
+}
+
+function nextActionsToOptions(actions: NextAction[]): GossipOption[] {
+  return actions.slice(0, 4).map(a => ({
+    label: a.label,
+    description: a.label,
+    command: mapNextActionToCommand(a),
+  }));
+}
+
+function mapNextActionToCommand(action: NextAction): VoiceCommand {
+  switch (action.type) {
+    case 'add_member':
+      return {
+        type: 'navigate',
+        payload: JSON.stringify({ screen: 'InviteMembers', ...action.params }),
+        rawText: action.label,
+        confidence: 1,
+      };
+    case 'open_group':
+      return {
+        type: 'open_chat',
+        payload: JSON.stringify({ groupId: action.params.groupId }),
+        rawText: action.label,
+        confidence: 1,
+      };
+    default:
+      return {
+        type: 'navigate',
+        payload: action.type,
+        rawText: action.label,
+        confidence: 1,
+      };
+  }
 }
 
 // ── Follow-up resolution ──

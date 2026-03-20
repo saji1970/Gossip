@@ -27,7 +27,10 @@ class MainActivity : ReactActivity() {
 
   override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
     if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-      emitKeyEvent("hardwareKeyDown", keyCode)
+      // Only emit on the initial press, ignore auto-repeat events
+      if (event?.repeatCount == 0) {
+        emitKeyEvent("hardwareKeyDown", keyCode)
+      }
       return true // consume the event so volume doesn't change
     }
     return super.onKeyDown(keyCode, event)
