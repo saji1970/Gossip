@@ -17,6 +17,7 @@ export type GossipIntent =
   | 'casual_chat'
   | 'show_groups'
   | 'settings_change'
+  | 'record_voice'
   | 'unknown';
 
 // ── Entity extraction ──

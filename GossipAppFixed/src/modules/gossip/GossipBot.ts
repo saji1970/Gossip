@@ -671,6 +671,58 @@ class GossipBot {
         return ResponseBuilder.buildSettingsAction(actionEntity?.value || 'settings');
       }
 
+      case 'record_voice': {
+        const groupEntity = entities.find(e => e.type === 'group');
+
+        // If already in a ChatRoom, record in current group
+        if (context.currentScreen === 'ChatRoom' && context.currentGroup) {
+          return ResponseBuilder.buildExecute(
+            `Starting voice recording in ${context.currentGroup.name}`,
+            {
+              type: 'record_voice',
+              payload: JSON.stringify({ groupId: context.currentGroup.id, groupName: context.currentGroup.name }),
+              rawText,
+              confidence: 1,
+            },
+          );
+        }
+
+        // Find matching group from entities
+        if (groupEntity) {
+          const matches = findGroup(groupEntity.value, context.groups);
+          if (matches.length > 0) {
+            const g = matches[0].group;
+            return ResponseBuilder.buildExecute(
+              `Recording voice message for ${g.name}`,
+              {
+                type: 'record_voice',
+                payload: JSON.stringify({ groupId: g.id, groupName: g.name }),
+                rawText,
+                confidence: 1,
+              },
+            );
+          }
+          return { type: 'info', message: `Couldn't find a group called "${groupEntity.value}".` };
+        }
+
+        // No group specified — ask
+        if (context.groups.length === 0) {
+          return { type: 'info', message: "You don't have any groups yet." };
+        }
+        const recordOptions = context.groups.slice(0, 4).map(g => ({
+          label: g.name,
+          description: `Record voice message for ${g.name}`,
+          command: {
+            type: 'record_voice' as const,
+            payload: JSON.stringify({ groupId: g.id, groupName: g.name }),
+            rawText: `record voice message for ${g.name}`,
+            confidence: 1,
+          },
+        }));
+        conversationState.setPending(rawText, 'record_voice', recordOptions);
+        return { type: 'clarify', message: 'Which group should I record a voice message for?', options: recordOptions };
+      }
+
       case 'help':
         return ResponseBuilder.buildHelp();
 
@@ -856,6 +908,7 @@ class GossipBot {
       case 'summarize': return `Summarizing conversation`;
       case 'start_ambient': return `Starting ambient mode`;
       case 'stop_ambient': return `Stopping ambient mode`;
+      case 'record_voice': return `Recording voice message`;
       default: return `Executing command`;
     }
   }

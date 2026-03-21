@@ -227,6 +227,16 @@ const intentClusters: IntentCluster[] = [
     ],
   },
   {
+    intent: 'record_voice',
+    clusters: [
+      ['record', 'voice'],
+      ['voice', 'message'],
+      ['record', 'message'],
+      ['send', 'voice'],
+      ['voice', 'note'],
+    ],
+  },
+  {
     intent: 'settings_change',
     clusters: [
       ['change', 'name'],
@@ -339,6 +349,19 @@ function extractEntities(text: string, intent: GossipIntent): ExtractedEntity[] 
   );
   if (screenMatch && intent === 'navigate') {
     entities.push({ type: 'screen', value: screenMatch[1].toLowerCase().replace(/s$/, '') });
+  }
+
+  // Record voice: extract target group from "for [group]" / "in [group]" / "to [group]"
+  if (intent === 'record_voice') {
+    const groupMatch2 = lower.match(
+      /(?:for|in|to)\s+([a-z][a-z0-9 ]*?)(?:\s+(?:group|chat|saying|and)|\s*$)/i,
+    );
+    if (groupMatch2) {
+      const name = groupMatch2[1].trim();
+      if (!STOP_WORDS.has(name.toLowerCase())) {
+        entities.push({ type: 'group', value: name });
+      }
+    }
   }
 
   // Settings action extraction

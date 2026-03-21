@@ -11,6 +11,8 @@ import {
   StyleSheet,
   Alert,
   Keyboard,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Colors, BorderRadius, Spacing, ACCENT_PRESETS, AccentName } from '../constants/theme';
 import { useApp } from '../context/AppContext';
@@ -27,6 +29,9 @@ import Tts from 'react-native-tts';
 import StarFieldBackground from '../components/futuristic/StarFieldBackground';
 import GlassCard from '../components/futuristic/GlassCard';
 import GlowingMicOrb from '../components/futuristic/GlowingMicOrb';
+import GlowingIconButton from '../components/futuristic/GlowingIconButton';
+import VoiceWaveform from '../components/futuristic/VoiceWaveform';
+import VoiceTestPanel from '../components/voice/VoiceTestPanel';
 import ProfileSection from './settings/ProfileSection';
 import VoiceTrainingSection from './settings/VoiceTrainingSection';
 import NotificationSection from './settings/NotificationSection';
@@ -36,6 +41,131 @@ interface MainTabsScreenProps {
   navigation?: any;
   onRefresh?: boolean;
 }
+
+// ── Typing Indicator (animated bouncing dots) ────────────────────
+
+const TypingIndicator: React.FC = () => {
+  const dot1 = useRef(new Animated.Value(0)).current;
+  const dot2 = useRef(new Animated.Value(0)).current;
+  const dot3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animateDot = (dot: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, { toValue: -6, duration: 280, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
+          Animated.timing(dot, { toValue: 0, duration: 280, useNativeDriver: true, easing: Easing.in(Easing.cubic) }),
+          Animated.delay(400 - delay),
+        ]),
+      );
+    animateDot(dot1, 0).start();
+    animateDot(dot2, 140).start();
+    animateDot(dot3, 280).start();
+  }, []);
+
+  return (
+    <View style={typingStyles.container}>
+      <View style={typingStyles.bubbleWrapper}>
+        <View style={typingStyles.accentBar} />
+        <View style={typingStyles.bubble}>
+          <Text style={typingStyles.label}>Gossip</Text>
+          <View style={typingStyles.dotsRow}>
+            {[dot1, dot2, dot3].map((dot, i) => (
+              <Animated.View
+                key={i}
+                style={[typingStyles.dot, { transform: [{ translateY: dot }] }]}
+              />
+            ))}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const typingStyles = StyleSheet.create({
+  container: { flexDirection: 'row', justifyContent: 'flex-start', marginBottom: 10 },
+  bubbleWrapper: { flexDirection: 'row', maxWidth: '50%' },
+  accentBar: {
+    width: 3, borderTopLeftRadius: 3, borderBottomLeftRadius: 3,
+    backgroundColor: '#818CF8',
+  },
+  bubble: {
+    backgroundColor: '#1E293B',
+    borderRadius: 18,
+    borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  label: {
+    fontSize: 11, fontWeight: '700', color: '#818CF8',
+    marginBottom: 6, letterSpacing: 0.5,
+  },
+  dotsRow: { flexDirection: 'row', gap: 5, alignItems: 'center', height: 14 },
+  dot: {
+    width: 7, height: 7, borderRadius: 4,
+    backgroundColor: 'rgba(129, 140, 248, 0.5)',
+  },
+});
+
+// ── Animated Group Pill ──────────────────────────────────────────
+
+const GroupPillItem: React.FC<{
+  group: Group;
+  color: string;
+  onPress: (g: Group) => void;
+}> = ({ group, color, onPress }) => {
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.9,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 8,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+      bounciness: 10,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        style={styles.groupPill}
+        onPress={() => onPress(group)}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        activeOpacity={1}
+      >
+        <View style={[
+          styles.groupPillAvatar,
+          { borderColor: color, shadowColor: color, shadowRadius: 6, shadowOpacity: 0.4, elevation: 4 },
+        ]}>
+          <Text style={styles.groupPillAvatarText}>
+            {group.name.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+        <Text style={styles.groupPillName} numberOfLines={1}>
+          {group.name}
+        </Text>
+        {group.unreadCount > 0 && (
+          <View style={styles.groupPillBadge}>
+            <Text style={styles.groupPillBadgeText}>{group.unreadCount}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
 
 // ── Settings Panel (reused from old SettingsTabContent) ──────────
 
@@ -244,9 +374,35 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
   const [messages, setMessages] = useState<ConversationEntry[]>([]);
   const [textInput, setTextInput] = useState('');
   const [settingsVisible, setSettingsVisible] = useState(false);
+  const [voiceTestVisible, setVoiceTestVisible] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const lastProcessedResult = useRef<string | null>(null);
   const hasWelcomed = useRef(false);
+
+  // Animated header glow
+  const headerGlow = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(headerGlow, { toValue: 1, duration: 2200, useNativeDriver: false, easing: Easing.inOut(Easing.sin) }),
+        Animated.timing(headerGlow, { toValue: 0, duration: 2200, useNativeDriver: false, easing: Easing.inOut(Easing.sin) }),
+      ]),
+    ).start();
+  }, []);
+
+  // Animated input focus glow
+  const inputGlow = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(inputGlow, {
+      toValue: inputFocused ? 1 : 0,
+      duration: 250,
+      useNativeDriver: false,
+    }).start();
+  }, [inputFocused]);
 
   // Load conversation history on mount
   useEffect(() => {
@@ -280,24 +436,21 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    // Add user message
     const userEntry = conversationHistory.addUserMessage(trimmed);
     setMessages(prev => [...prev, userEntry]);
+    setIsProcessing(true);
 
-    // Process through GossipBot
     const response = await processInput(trimmed, 'MainTabs');
+    setIsProcessing(false);
 
-    // Add gossip response
     const gossipEntry = conversationHistory.addGossipMessage(
       response.message,
       response.options,
     );
     setMessages(prev => [...prev, gossipEntry]);
 
-    // Speak response
     try { Tts.speak(response.message); } catch {}
 
-    // Handle execute commands
     if (response.type === 'execute' && response.command) {
       const cmd = response.command;
       setTimeout(() => {
@@ -319,16 +472,15 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
   };
 
   const handleOptionTap = async (option: GossipOption) => {
-    // Add user selection as a message
     const userEntry = conversationHistory.addUserMessage(option.label);
     setMessages(prev => [...prev, userEntry]);
+    setIsProcessing(true);
 
-    // Process the option through GossipBot
     const response = await processInput(option.label, 'MainTabs');
+    setIsProcessing(false);
     const gossipEntry = conversationHistory.addGossipMessage(response.message, response.options);
     setMessages(prev => [...prev, gossipEntry]);
 
-    // If it has a command, execute it
     const cmd = response.command || option.command;
     if (cmd) {
       setTimeout(() => {
@@ -355,7 +507,6 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
         } else if (payload === 'chat' || payload === 'group' || payload === 'home') {
           // Already home
         } else {
-          // Try parsing JSON payload for InviteMembers / other screens
           try {
             const parsed = JSON.parse(payload);
             if (parsed.screen === 'InviteMembers' && parsed.groupId) {
@@ -364,9 +515,7 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
                 navigation?.navigate('InviteMembers', { group: targetGroup });
               }
             }
-          } catch {
-            // Not JSON — ignore
-          }
+          } catch {}
         }
         break;
       }
@@ -400,7 +549,6 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
         break;
       }
       case 'private_chat':
-        // DM support — navigate to chat list for now
         break;
       case 'call_group': {
         if (payload) {
@@ -411,9 +559,19 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
         }
         break;
       }
+      case 'record_voice': {
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.groupId) {
+            const targetGroup = groups.find(g => g.id === parsed.groupId);
+            if (targetGroup) {
+              navigation?.navigate('ChatRoom', { group: targetGroup, startVoiceRecord: true });
+            }
+          }
+        } catch {}
+        break;
+      }
       case 'confirm_action':
-        // Confirmation is handled by GossipBot.handlePendingAction
-        // Just re-process the yes/no through the bot
         handleUserInput(payload);
         break;
     }
@@ -427,9 +585,13 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
     }
   }, [voiceState, startListening, stopListening]);
 
-  // ── Volume button: long press volume down to toggle voice ──
+  const handleVolumeUpRecord = useCallback(() => {
+    handleUserInput('record voice message');
+  }, [handleUserInput]);
+
   useVolumeButtons({
     onVolumeDownLongPress: handleOrbPress,
+    onVolumeUpLongPress: handleVolumeUpRecord,
     enabled: true,
   });
 
@@ -443,13 +605,23 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
       ? 'processing'
       : 'idle';
 
+  const formatTime = (ts: number) => {
+    const d = new Date(ts);
+    const h = d.getHours();
+    const m = d.getMinutes().toString().padStart(2, '0');
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h % 12 || 12}:${m} ${ampm}`;
+  };
+
   // ── Render a conversation bubble ──
   const renderMessage = ({ item }: { item: ConversationEntry }) => {
     if (item.role === 'system') {
       return (
         <View style={styles.systemRow}>
-          <Text style={styles.systemIcon}>{'\u2713'}</Text>
-          <Text style={styles.systemText}>{item.text}</Text>
+          <View style={styles.systemPill}>
+            <Text style={styles.systemIcon}>{'\u2713'}</Text>
+            <Text style={styles.systemText}>{item.text}</Text>
+          </View>
         </View>
       );
     }
@@ -459,31 +631,39 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
         <View style={styles.userRow}>
           <View style={styles.userBubble}>
             <Text style={styles.userBubbleText}>{item.text}</Text>
+            <Text style={styles.timestamp}>{formatTime(item.timestamp)}</Text>
           </View>
         </View>
       );
     }
 
-    // Gossip bubble
+    // Gossip bubble with two-tone accent bar
     return (
       <View style={styles.gossipRow}>
-        <View style={styles.gossipBubble}>
-          <Text style={styles.gossipLabel}>Gossip</Text>
-          <Text style={styles.gossipBubbleText}>{item.text}</Text>
-          {item.options && item.options.length > 0 && (
-            <View style={styles.optionPills}>
-              {item.options.map((opt, i) => (
-                <TouchableOpacity
-                  key={i}
-                  style={styles.optionPill}
-                  onPress={() => handleOptionTap(opt)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.optionPillText}>{opt.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+        <View style={styles.gossipBubbleWrapper}>
+          <View style={styles.accentBarGradient}>
+            <View style={styles.accentBarTop} />
+            <View style={styles.accentBarBottom} />
+          </View>
+          <View style={styles.gossipBubble}>
+            <Text style={styles.gossipLabel}>Gossip</Text>
+            <Text style={styles.gossipBubbleText}>{item.text}</Text>
+            {item.options && item.options.length > 0 && (
+              <View style={styles.optionPills}>
+                {item.options.map((opt, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.optionPill}
+                    onPress={() => handleOptionTap(opt)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.optionPillText}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            <Text style={styles.timestampGossip}>{formatTime(item.timestamp)}</Text>
+          </View>
         </View>
       </View>
     );
@@ -491,62 +671,73 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
 
   const avatarColors = ['#818CF8', '#34D399', '#FB923C', '#F87171', '#60A5FA', '#A78BFA', '#F472B6'];
 
+  const headerTextShadowRadius = headerGlow.interpolate({
+    inputRange: [0, 1],
+    outputRange: [10, 22],
+  });
+
+  const inputBorderColor = inputGlow.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(148, 163, 184, 0.12)', 'rgba(129, 140, 248, 0.5)'],
+  });
+
+  const inputShadowOpacity = inputGlow.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.3],
+  });
+
   return (
     <StarFieldBackground starCount={35} showRadialGlow={true}>
       <View style={styles.container}>
         {/* ── Header ── */}
         <View style={styles.topBar}>
           <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>Gossip</Text>
+            <Animated.Text style={[styles.headerTitle, { textShadowRadius: headerTextShadowRadius }]}>
+              Gossip
+            </Animated.Text>
             {backendAvailable && (
               <View style={styles.aiBadge}>
                 <Text style={styles.aiBadgeText}>AI</Text>
               </View>
             )}
           </View>
-          <TouchableOpacity
-            style={styles.settingsBtn}
-            onPress={() => setSettingsVisible(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.settingsIcon}>{'\u2699\uFE0F'}</Text>
-          </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <GlowingIconButton
+              icon={'\uD83E\uDDEA'}
+              onPress={() => setVoiceTestVisible(true)}
+              size={40}
+              glowColor="rgba(129, 140, 248, 0.2)"
+            />
+            <GlowingIconButton
+              icon={'\u2699\uFE0F'}
+              onPress={() => setSettingsVisible(true)}
+              size={40}
+              glowColor="rgba(148, 163, 184, 0.2)"
+            />
+          </View>
         </View>
 
         {/* ── Group Pills ── */}
         {groups.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.groupPillsContainer}
-            contentContainerStyle={styles.groupPillsContent}
-          >
-            {groups.slice(0, 10).map((g) => {
-              const color = avatarColors[g.name.length % avatarColors.length];
-              return (
-                <TouchableOpacity
-                  key={g.id}
-                  style={styles.groupPill}
-                  onPress={() => handleGroupPillPress(g)}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.groupPillAvatar, { borderColor: color }]}>
-                    <Text style={styles.groupPillAvatarText}>
-                      {g.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={styles.groupPillName} numberOfLines={1}>
-                    {g.name}
-                  </Text>
-                  {g.unreadCount > 0 && (
-                    <View style={styles.groupPillBadge}>
-                      <Text style={styles.groupPillBadgeText}>{g.unreadCount}</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+          <GlassCard style={styles.groupPillsGlass} intensity="low" noBorder>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.groupPillsContent}
+            >
+              {groups.slice(0, 10).map((g) => {
+                const color = avatarColors[g.name.length % avatarColors.length];
+                return (
+                  <GroupPillItem
+                    key={g.id}
+                    group={g}
+                    color={color}
+                    onPress={handleGroupPillPress}
+                  />
+                );
+              })}
+            </ScrollView>
+          </GlassCard>
         )}
 
         {/* ── Conversation FlatList ── */}
@@ -559,10 +750,16 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
           contentContainerStyle={styles.chatListContent}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           showsVerticalScrollIndicator={false}
+          ListFooterComponent={isProcessing ? <TypingIndicator /> : null}
         />
 
-        {/* ── Mic Orb ── */}
+        {/* ── Mic Orb + Waveform ── */}
         <View style={styles.orbArea}>
+          {voiceState === 'listening' && (
+            <View style={styles.orbWaveform}>
+              <VoiceWaveform isActive={true} barCount={40} color="#818CF8" height={24} />
+            </View>
+          )}
           <GlowingMicOrb
             state={orbState}
             size={100}
@@ -574,25 +771,50 @@ const MainTabsScreen: React.FC<MainTabsScreenProps> = ({ navigation }) => {
         </View>
 
         {/* ── Text Input Fallback ── */}
-        <View style={styles.inputBar}>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Tell Gossip what to do..."
-            placeholderTextColor="rgba(148, 163, 184, 0.4)"
-            value={textInput}
-            onChangeText={setTextInput}
-            onSubmitEditing={handleTextSubmit}
-            returnKeyType="send"
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, !textInput.trim() && styles.sendBtnDisabled]}
-            onPress={handleTextSubmit}
-            disabled={!textInput.trim()}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.sendBtnText}>{'\u2192'}</Text>
-          </TouchableOpacity>
-        </View>
+        <Animated.View style={[
+          styles.inputBar,
+          {
+            shadowColor: '#818CF8',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: inputShadowOpacity,
+            shadowRadius: 12,
+          },
+        ]}>
+          <GlassCard style={styles.inputGlass} intensity="low" noBorder>
+            <View style={styles.inputRow}>
+              <Animated.View style={[styles.textInputWrapper, { borderColor: inputBorderColor }]}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Tell Gossip what to do..."
+                  placeholderTextColor="rgba(148, 163, 184, 0.4)"
+                  value={textInput}
+                  onChangeText={setTextInput}
+                  onSubmitEditing={handleTextSubmit}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
+                  returnKeyType="send"
+                />
+              </Animated.View>
+              <TouchableOpacity
+                style={[
+                  styles.sendBtn,
+                  !textInput.trim() && styles.sendBtnDisabled,
+                ]}
+                onPress={handleTextSubmit}
+                disabled={!textInput.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.sendBtnText}>{'\u2192'}</Text>
+              </TouchableOpacity>
+            </View>
+          </GlassCard>
+        </Animated.View>
+
+        {/* ── Voice Test Panel ── */}
+        <VoiceTestPanel
+          visible={voiceTestVisible}
+          onClose={() => setVoiceTestVisible(false)}
+        />
 
         {/* ── Settings Panel ── */}
         <SettingsPanel
@@ -648,16 +870,16 @@ const styles = StyleSheet.create({
     color: '#34D399',
     letterSpacing: 0.5,
   },
-  settingsBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(30, 41, 59, 0.5)',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: 'rgba(148, 163, 184, 0.15)',
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  settingsIcon: { fontSize: 20 },
   // ── Group Pills ──
-  groupPillsContainer: {
-    maxHeight: 72,
+  groupPillsGlass: {
+    marginHorizontal: 0,
+    borderRadius: 0,
+    padding: 0,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(148, 163, 184, 0.08)',
   },
@@ -676,6 +898,7 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: 'rgba(30, 41, 59, 0.8)', borderWidth: 1.5,
     alignItems: 'center', justifyContent: 'center',
+    shadowOffset: { width: 0, height: 0 },
   },
   groupPillAvatarText: { color: '#F1F5F9', fontSize: 16, fontWeight: '700' },
   groupPillName: {
@@ -710,26 +933,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     maxWidth: '78%',
+    shadowColor: '#312E81',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
   },
   userBubbleText: {
     color: '#E0E7FF',
     fontSize: 15,
     lineHeight: 21,
   },
+  timestamp: {
+    fontSize: 10,
+    color: 'rgba(224, 231, 255, 0.35)',
+    marginTop: 4,
+    textAlign: 'right',
+  },
   gossipRow: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
     marginBottom: 10,
   },
+  gossipBubbleWrapper: {
+    flexDirection: 'row',
+    maxWidth: '85%',
+  },
+  accentBarGradient: {
+    width: 3,
+    borderTopLeftRadius: 3,
+    borderBottomLeftRadius: 3,
+    overflow: 'hidden',
+  },
+  accentBarTop: {
+    flex: 1,
+    backgroundColor: '#818CF8',
+  },
+  accentBarBottom: {
+    flex: 1,
+    backgroundColor: '#34D399',
+  },
   gossipBubble: {
     backgroundColor: '#1E293B',
     borderRadius: 18,
     borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 0,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    maxWidth: '85%',
-    borderLeftWidth: 3,
-    borderLeftColor: '#818CF8',
+    flex: 1,
   },
   gossipLabel: {
     fontSize: 11,
@@ -743,12 +994,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
   },
+  timestampGossip: {
+    fontSize: 10,
+    color: 'rgba(226, 232, 240, 0.3)',
+    marginTop: 4,
+  },
   systemRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 10,
+  },
+  systemPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
+    backgroundColor: 'rgba(52, 211, 153, 0.08)',
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.15)',
   },
   systemIcon: {
     fontSize: 12,
@@ -756,8 +1021,7 @@ const styles = StyleSheet.create({
   },
   systemText: {
     fontSize: 12,
-    color: 'rgba(148, 163, 184, 0.5)',
-    fontStyle: 'italic',
+    color: 'rgba(52, 211, 153, 0.7)',
   },
   // ── Option Pills ──
   optionPills: {
@@ -785,6 +1049,11 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 2,
   },
+  orbWaveform: {
+    position: 'absolute',
+    bottom: 38,
+    zIndex: -1,
+  },
   orbLabel: {
     fontSize: 13,
     color: 'rgba(148, 163, 184, 0.5)',
@@ -793,34 +1062,50 @@ const styles = StyleSheet.create({
   },
   // ── Input Bar ──
   inputBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     paddingBottom: 28,
     backgroundColor: 'rgba(15, 23, 42, 0.8)',
     borderTopWidth: 1,
     borderTopColor: 'rgba(148, 163, 184, 0.08)',
+  },
+  inputGlass: {
+    padding: 6,
+    borderRadius: 24,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+  },
+  textInputWrapper: {
+    flex: 1,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
   textInput: {
     flex: 1,
     height: 42,
-    backgroundColor: 'rgba(30, 41, 59, 0.6)',
-    borderRadius: 21,
     paddingHorizontal: 16,
     color: '#F1F5F9',
     fontSize: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.12)',
   },
   sendBtn: {
     width: 42, height: 42, borderRadius: 21,
     backgroundColor: '#818CF8',
     alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#818CF8',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
   },
   sendBtnDisabled: {
     backgroundColor: 'rgba(129, 140, 248, 0.3)',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   sendBtnText: {
     color: '#FFFFFF',

@@ -1,5 +1,7 @@
 // Voice state machine: idle → listening → processing → result (or error)
-// Mock implementation — ready for real STT integration later
+// Uses @react-native-voice/voice for real STT
+
+import Voice, { SpeechResultsEvent, SpeechErrorEvent } from '@react-native-voice/voice';
 
 export type VoiceState = 'idle' | 'listening' | 'processing' | 'error';
 
@@ -16,8 +18,7 @@ class VoiceService {
   private state: VoiceState = 'idle';
   private stateListeners: StateChangeCallback[] = [];
   private resultListeners: ResultCallback[] = [];
-  private listeningTimer: ReturnType<typeof setTimeout> | null = null;
-  private processingTimer: ReturnType<typeof setTimeout> | null = null;
+  private initialized = false;
 
   getState(): VoiceState {
     return this.state;
@@ -30,6 +31,42 @@ class VoiceService {
 
   private emitResult(result: VoiceResult) {
     this.resultListeners.forEach(cb => cb(result));
+  }
+
+  private ensureInitialized() {
+    if (this.initialized) return;
+    this.initialized = true;
+
+    Voice.onSpeechStart = () => {
+      this.setState('listening');
+    };
+
+    Voice.onSpeechEnd = () => {
+      if (this.state === 'listening') {
+        this.setState('processing');
+      }
+    };
+
+    Voice.onSpeechResults = (e: SpeechResultsEvent) => {
+      const text = e.value?.[0] || '';
+      if (text) {
+        this.emitResult({ text, confidence: 0.95, timestamp: Date.now() });
+      }
+      this.setState('idle');
+    };
+
+    Voice.onSpeechPartialResults = (_e: SpeechResultsEvent) => {
+      // Could show partial transcript — skip for now
+    };
+
+    Voice.onSpeechError = (e: SpeechErrorEvent) => {
+      console.warn('[VoiceService] STT error:', e.error);
+      this.setState('error');
+      // Auto-reset to idle after 1s
+      setTimeout(() => {
+        if (this.state === 'error') this.setState('idle');
+      }, 1000);
+    };
   }
 
   onStateChange(cb: StateChangeCallback): () => void {
@@ -46,41 +83,39 @@ class VoiceService {
     };
   }
 
-  startListening() {
+  async startListening() {
     if (this.state === 'listening' || this.state === 'processing') return;
 
-    this.clearTimers();
+    this.ensureInitialized();
     this.setState('listening');
 
-    // Simulate 2s of listening then auto-stop
-    this.listeningTimer = setTimeout(() => {
-      this.stopListening();
-    }, 2000);
+    try {
+      await Voice.start('en-US');
+    } catch (err) {
+      console.warn('[VoiceService] Failed to start:', err);
+      this.setState('error');
+      setTimeout(() => {
+        if (this.state === 'error') this.setState('idle');
+      }, 1000);
+    }
   }
 
-  stopListening() {
+  async stopListening() {
     if (this.state !== 'listening') return;
 
-    this.clearTimers();
     this.setState('processing');
-
-    // Simulate 0.5s processing delay then produce a mock result
-    this.processingTimer = setTimeout(() => {
-      const mockPhrases = [
-        'Hello everyone',
-        'How are you doing',
-        'Let me check that',
-        'Sounds good to me',
-        'See you later',
-      ];
-      const text = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-      this.emitResult({ text, confidence: 0.92, timestamp: Date.now() });
+    try {
+      await Voice.stop();
+    } catch (err) {
+      console.warn('[VoiceService] Failed to stop:', err);
       this.setState('idle');
-    }, 500);
+    }
   }
 
-  cancelListening() {
-    this.clearTimers();
+  async cancelListening() {
+    try {
+      await Voice.cancel();
+    } catch {}
     this.setState('idle');
   }
 
@@ -88,31 +123,22 @@ class VoiceService {
   simulateInput(text: string) {
     if (!text.trim()) return;
 
-    this.clearTimers();
     this.setState('processing');
 
-    this.processingTimer = setTimeout(() => {
+    setTimeout(() => {
       this.emitResult({ text: text.trim(), confidence: 1.0, timestamp: Date.now() });
       this.setState('idle');
-    }, 300);
+    }, 200);
   }
 
-  private clearTimers() {
-    if (this.listeningTimer) {
-      clearTimeout(this.listeningTimer);
-      this.listeningTimer = null;
-    }
-    if (this.processingTimer) {
-      clearTimeout(this.processingTimer);
-      this.processingTimer = null;
-    }
-  }
-
-  destroy() {
-    this.clearTimers();
+  async destroy() {
+    try {
+      await Voice.destroy();
+    } catch {}
     this.stateListeners = [];
     this.resultListeners = [];
     this.state = 'idle';
+    this.initialized = false;
   }
 }
 

@@ -21,7 +21,9 @@ import GlassCard from '../components/futuristic/GlassCard';
 import GlowingMicOrb from '../components/futuristic/GlowingMicOrb';
 import GlowingIconButton from '../components/futuristic/GlowingIconButton';
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
+import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useTTS } from '../hooks/useTTS';
+import { useGossipBot } from '../hooks/useGossipBot';
 import * as LastReadService from '../services/LastReadService';
 import * as api from '../services/api';
 
@@ -64,23 +66,31 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
   const lastProcessedResult = useRef<string | null>(null);
 
   const playback = useAudioPlayback();
+  const recorder = useAudioRecorder();
   const tts = useTTS();
   const { voiceState, startListening, stopListening, lastResult } = useVoice();
+  const { processInput } = useGossipBot();
   const [voiceOverlayVisible, setVoiceOverlayVisible] = useState(false);
   const [ambientMode, setAmbientMode] = useState(false);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [voiceRecordingPrompt, setVoiceRecordingPrompt] = useState('');
 
   // ── Volume button handlers ──
   const handleVolDownLongPress = useCallback(() => {
+    if (isVoiceRecording) {
+      stopAndSendVoiceRecording();
+      return;
+    }
     setVoiceOverlayVisible(prev => !prev);
-  }, []);
+  }, [isVoiceRecording, stopAndSendVoiceRecording]);
 
   const handleVolUpLongPress = useCallback(() => {
-    if (voiceState === 'listening') {
-      stopListening();
+    if (isVoiceRecording) {
+      stopAndSendVoiceRecording();
     } else {
-      startListening();
+      startVoiceRecording();
     }
-  }, [voiceState, startListening, stopListening]);
+  }, [isVoiceRecording, startVoiceRecording, stopAndSendVoiceRecording]);
 
   useVolumeButtons({
     onVolumeDownLongPress: handleVolDownLongPress,
@@ -118,11 +128,22 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     }
   }, [messages.length]);
 
-  // Handle voice STT results
+  // Handle voice STT results with "Hey Gossip" wake word gate
   useEffect(() => {
     if (lastResult && lastResult.text && lastResult.text !== lastProcessedResult.current) {
       lastProcessedResult.current = lastResult.text;
-      handleSendMessage(lastResult.text);
+      const text = lastResult.text.trim();
+      const wakeWordMatch = text.match(/^hey\s+gossip[\s,]*/i);
+      if (wakeWordMatch) {
+        // Strip "hey gossip" prefix and route through GossipBot
+        const command = text.slice(wakeWordMatch[0].length).trim();
+        if (command) {
+          handleGossipCommand(command);
+        }
+      } else {
+        // Not a Gossip command — send as regular message
+        handleSendMessage(text);
+      }
     }
   }, [lastResult]);
 
@@ -209,6 +230,70 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
     handleSendMessage(text);
   }, [handleSendMessage]);
 
+  // Process text through GossipBot (wake-word-gated commands)
+  const handleGossipCommand = useCallback(async (text: string) => {
+    const response = await processInput(text, 'ChatRoom', group);
+    if (response.type === 'execute' && response.command) {
+      handleVoiceCommand(response.command.type, response.command.payload);
+    } else if (response.message) {
+      Alert.alert('Gossip', response.message);
+    }
+  }, [processInput, group]);
+
+  // Voice recording: start
+  const startVoiceRecording = useCallback(async (prompt?: string) => {
+    setVoiceRecordingPrompt(prompt || 'Speak now. Press volume down or tap Stop to finish.');
+    setIsVoiceRecording(true);
+    try {
+      await recorder.startRecording();
+    } catch {
+      setIsVoiceRecording(false);
+      Alert.alert('Error', 'Could not start recording');
+    }
+  }, [recorder]);
+
+  // Voice recording: stop and send
+  const stopAndSendVoiceRecording = useCallback(async () => {
+    if (!recorder.isRecording) return;
+    try {
+      const result = await recorder.stopRecording();
+      setIsVoiceRecording(false);
+      setVoiceRecordingPrompt('');
+      if (result.uri && groupId) {
+        const voiceMsg: Message = {
+          id: `voice-${Date.now()}`,
+          senderId: user?.email || 'user@example.com',
+          senderName: user?.displayName || 'You',
+          content: 'Voice message',
+          timestamp: new Date(),
+          isOwnMessage: true,
+          type: 'voice',
+          audioUri: result.uri,
+          audioDuration: result.durationMs,
+        };
+        addMessage(voiceMsg);
+
+        // Upload voice message to backend
+        const senderName = user?.displayName || 'You';
+        api.sendVoiceMessage(groupId, result.uri, result.durationMs, senderName).catch(() => {});
+      }
+    } catch {
+      setIsVoiceRecording(false);
+      Alert.alert('Error', 'Could not save recording');
+    }
+  }, [recorder, groupId, user, addMessage]);
+
+  // Handle startVoiceRecord param from navigation
+  useEffect(() => {
+    if (route?.params?.startVoiceRecord && group) {
+      // Small delay to let the screen mount fully
+      const timer = setTimeout(() => {
+        startVoiceRecording('Please speak and press volume down button to finish recording and send to group');
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [route?.params?.startVoiceRecord, group]);
+
   const handleSummarize = useCallback(async () => {
     if (!groupId) return;
     try {
@@ -279,6 +364,9 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
         break;
       case 'stop_ambient':
         setAmbientMode(false);
+        break;
+      case 'record_voice':
+        startVoiceRecording();
         break;
       default:
         break;
@@ -543,6 +631,38 @@ const ChatRoomScreen: React.FC<ChatRoomScreenProps> = ({ navigation, route }) =>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Voice Recording Overlay */}
+      {isVoiceRecording && (
+        <View style={styles.recordingOverlay}>
+          <View style={styles.recordingCard}>
+            <View style={styles.recordingDotRow}>
+              <View style={styles.recordingDot} />
+              <Text style={styles.recordingLabel}>Recording</Text>
+            </View>
+            <Text style={styles.recordingTimer}>
+              {formatDuration(recorder.recordingDurationMs)}
+            </Text>
+            <Text style={styles.recordingPrompt}>{voiceRecordingPrompt}</Text>
+            <View style={styles.recordingActions}>
+              <TouchableOpacity
+                style={styles.recordingCancelBtn}
+                onPress={() => { recorder.cancelRecording(); setIsVoiceRecording(false); setVoiceRecordingPrompt(''); }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.recordingCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.recordingStopBtn}
+                onPress={stopAndSendVoiceRecording}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.recordingStopText}>Stop & Send</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
 
       {/* Voice Command Overlay */}
       <VoiceCommandOverlay
@@ -892,6 +1012,81 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 20,
     fontWeight: '700',
+  },
+  // ── Recording Overlay ──
+  recordingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  recordingCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 24,
+    padding: 28,
+    alignItems: 'center',
+    width: '80%',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.3)',
+  },
+  recordingDotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#F87171',
+  },
+  recordingLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F87171',
+  },
+  recordingTimer: {
+    fontSize: 36,
+    fontWeight: '300',
+    color: '#F1F5F9',
+    marginBottom: 12,
+    fontVariant: ['tabular-nums'],
+  },
+  recordingPrompt: {
+    fontSize: 14,
+    color: 'rgba(148, 163, 184, 0.7)',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  recordingActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  recordingCancelBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+  },
+  recordingCancelText: {
+    color: '#94A3B8',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  recordingStopBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: '#F87171',
+  },
+  recordingStopText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
 

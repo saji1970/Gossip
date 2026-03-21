@@ -14,6 +14,7 @@ export type CommandType =
   | 'summarize'
   | 'start_ambient'
   | 'stop_ambient'
+  | 'record_voice'
   | 'unknown';
 
 export interface VoiceCommand {
@@ -188,6 +189,15 @@ const commandPatterns: CommandPattern[] = [
       /^(?:vibes\s+off|chill\s+mode\s+off)$/i,
     ],
     extractPayload: () => '',
+  },
+  {
+    type: 'record_voice',
+    patterns: [
+      /^record\s+(?:a\s+)?(?:voice\s+)?message\s*(.*)$/i,
+      /^(?:send\s+(?:a\s+)?)?voice\s+(?:message|note)\s*(.*)$/i,
+      /^record\s+(?:a\s+)?voice\s*(.*)$/i,
+    ],
+    extractPayload: (match) => match[1]?.trim() || '',
   },
   {
     type: 'open_chat',
