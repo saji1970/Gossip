@@ -1,4 +1,4 @@
-import { PendingClarification, GossipIntent, GossipOption } from './types';
+import { PendingClarification, GossipIntent, GossipOption, ExtractedEntity, EntityType } from './types';
 
 const EXPIRY_MS = 30_000; // 30 seconds
 const MAX_TURNS = 5;
@@ -10,6 +10,8 @@ class ConversationState {
     originalText: string,
     intent: GossipIntent,
     options: GossipOption[],
+    entities: ExtractedEntity[] = [],
+    missingEntities: EntityType[] = [],
   ): void {
     this.pending = {
       originalText,
@@ -17,6 +19,8 @@ class ConversationState {
       options,
       createdAt: Date.now(),
       turnCount: 0,
+      entities,
+      missingEntities,
     };
   }
 
@@ -30,6 +34,27 @@ class ConversationState {
     }
 
     return this.pending;
+  }
+
+  /**
+   * Merge new entities into the pending clarification and remove
+   * satisfied types from missingEntities.
+   */
+  mergeEntities(newEntities: ExtractedEntity[]): void {
+    if (!this.pending) return;
+    for (const entity of newEntities) {
+      // Replace existing entity of same type, or add new
+      const idx = this.pending.entities.findIndex(e => e.type === entity.type);
+      if (idx >= 0) {
+        this.pending.entities[idx] = entity;
+      } else {
+        this.pending.entities.push(entity);
+      }
+      // Remove from missing
+      this.pending.missingEntities = this.pending.missingEntities.filter(
+        t => t !== entity.type,
+      );
+    }
   }
 
   /** Returns false if max turns exceeded (prevents loops). */

@@ -4,8 +4,10 @@ import {
   GossipResponse,
   GossipIntent,
   ExtractedEntity,
+  EntityType,
   BackendIntentResult,
   PendingAction,
+  PendingClarification,
   ActionExecuteResult,
 } from './types';
 import { learningStore } from './LearningStore';
@@ -267,7 +269,12 @@ class GossipBot {
   ): GossipResponse {
     // If the backend needs more info, set up a follow-up
     if (result.needsInfo) {
-      conversationState.setPending(rawText, result.intent as GossipIntent, []);
+      const backendEntities: ExtractedEntity[] = result.entities.map(e => ({
+        type: e.type as ExtractedEntity['type'],
+        value: e.value,
+      }));
+      const missing: EntityType[] = result.needsInfo ? [result.needsInfo as EntityType] : [];
+      conversationState.setPending(rawText, result.intent as GossipIntent, [], backendEntities, missing);
       return { type: 'clarify', message: result.message, options: [] };
     }
 
@@ -439,7 +446,7 @@ class GossipBot {
       case 'create_group': {
         if (!cmd.payload) {
           const resp = ResponseBuilder.buildMissingGroupName();
-          conversationState.setPending(cmd.rawText, 'create_group', []);
+          conversationState.setPending(cmd.rawText, 'create_group', [], [], ['group']);
           return resp;
         }
         return null;
@@ -454,7 +461,7 @@ class GossipBot {
             };
           }
           const resp = ResponseBuilder.buildCallAmbiguity(context.groups);
-          conversationState.setPending(cmd.rawText, 'call_group', resp.options || []);
+          conversationState.setPending(cmd.rawText, 'call_group', resp.options || [], [], ['group']);
           return resp;
         }
         return null;
@@ -463,11 +470,14 @@ class GossipBot {
       case 'send_message': {
         if (context.currentScreen !== 'ChatRoom' && context.groups.length > 0) {
           const msgContent = cmd.payload;
+          const entities: ExtractedEntity[] = msgContent
+            ? [{ type: 'message', value: msgContent }]
+            : [];
           const resp = ResponseBuilder.buildSendMessageAmbiguity(
             msgContent,
             context.groups,
           );
-          conversationState.setPending(cmd.rawText, 'send_message', resp.options || []);
+          conversationState.setPending(cmd.rawText, 'send_message', resp.options || [], entities, ['group']);
           return resp;
         }
         return null;
@@ -506,7 +516,7 @@ class GossipBot {
         const groupEntity = entities.find(e => e.type === 'group');
         if (!groupEntity) {
           const resp = ResponseBuilder.buildMissingGroupName();
-          conversationState.setPending(rawText, 'create_group', []);
+          conversationState.setPending(rawText, 'create_group', [], entities, ['group']);
           return resp;
         }
 
@@ -534,7 +544,8 @@ class GossipBot {
         const groupEntity = entities.find(e => e.type === 'group');
 
         if (!email) {
-          conversationState.setPending(rawText, 'add_member', []);
+          const missing = this.getMissingEntities('add_member', entities, context);
+          conversationState.setPending(rawText, 'add_member', [], entities, missing);
           return {
             type: 'clarify',
             message: `What's ${person || 'their'} email address?`,
@@ -557,7 +568,7 @@ class GossipBot {
               confidence: 1,
             },
           }));
-          conversationState.setPending(rawText, 'add_member', options);
+          conversationState.setPending(rawText, 'add_member', options, entities, ['group']);
           return { type: 'clarify', message: 'Which group?', options };
         }
 
@@ -591,7 +602,7 @@ class GossipBot {
           return { type: 'info', message: "You don't have any groups to call yet" };
         }
         const resp = ResponseBuilder.buildCallAmbiguity(context.groups);
-        conversationState.setPending(rawText, 'call_group', resp.options || []);
+        conversationState.setPending(rawText, 'call_group', resp.options || [], entities, ['group']);
         return resp;
       }
 
@@ -608,7 +619,7 @@ class GossipBot {
           return { type: 'info', message: "You don't have any groups yet" };
         }
         const sendResp = ResponseBuilder.buildSendMessageAmbiguity(msg, context.groups);
-        conversationState.setPending(rawText, 'send_message', sendResp.options || []);
+        conversationState.setPending(rawText, 'send_message', sendResp.options || [], entities, ['group']);
         return sendResp;
       }
 
@@ -719,7 +730,7 @@ class GossipBot {
             confidence: 1,
           },
         }));
-        conversationState.setPending(rawText, 'record_voice', recordOptions);
+        conversationState.setPending(rawText, 'record_voice', recordOptions, entities, ['group']);
         return { type: 'clarify', message: 'Which group should I record a voice message for?', options: recordOptions };
       }
 
@@ -768,6 +779,8 @@ class GossipBot {
       `chat with ${name}`,
       'chat_with_person',
       resp.options || [],
+      [{ type: 'person', value: name }],
+      ['group'],
     );
     return resp;
   }
@@ -811,10 +824,13 @@ class GossipBot {
     if (pending.intent === 'add_member' && pending.options.length === 0) {
       const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
       if (emailMatch) {
-        conversationState.reset();
-        // Re-process with the email now available
-        return this.processInput(
-          `${pending.originalText} email ${emailMatch[0]}`,
+        // Merge the email entity and check if we have everything
+        conversationState.mergeEntities([{ type: 'email', value: emailMatch[0] }]);
+        const updatedPending = conversationState.getPending()!;
+        return this.resolveIntentOrAskMore(
+          updatedPending.originalText,
+          updatedPending.intent,
+          updatedPending.entities,
           context,
         );
       }
@@ -825,6 +841,7 @@ class GossipBot {
       };
     }
 
+    // Try matching against presented options (pill taps + typed labels)
     const matchIdx = ResponseBuilder.resolveFollowUp(text, pending.options);
     if (matchIdx >= 0) {
       const option = pending.options[matchIdx];
@@ -843,11 +860,189 @@ class GossipBot {
       };
     }
 
+    // Escape hatch: if user's text is a high-confidence new intent, reset and process fresh
+    const freshIntent = IntentResolver.resolve(text);
+    if (freshIntent.confidence >= 0.8 && freshIntent.intent !== 'casual_chat' && freshIntent.intent !== 'unknown') {
+      conversationState.reset();
+      return this.processInput(text, context);
+    }
+
+    // Fallback: try to extract the missing entity from the follow-up text
+    const mergeResult = this.tryEntityMerge(text, pending, context);
+    if (mergeResult) {
+      return mergeResult;
+    }
+
     return {
       type: 'clarify',
       message: `Hmm didn't catch which one. Pick an option or say it again?`,
       options: pending.options,
     };
+  }
+
+  /**
+   * Try to extract a missing entity from follow-up text and merge it
+   * into the pending clarification. Returns a response if successful.
+   */
+  private tryEntityMerge(
+    text: string,
+    pending: PendingClarification,
+    context: GossipContext,
+  ): GossipResponse | null {
+    const missing = pending.missingEntities;
+    const newEntities: ExtractedEntity[] = [];
+
+    // Strip prepositions: "in poker group" → "poker group"
+    const stripped = text
+      .replace(/^(in|to|for|from|at|on|into|the)\s+/i, '')
+      .replace(/\s+(group|chat|one)$/i, '')
+      .trim();
+
+    // Try to resolve each missing entity type
+    if (missing.includes('group')) {
+      // Try against known groups
+      const matches = findGroup(stripped, context.groups);
+      if (matches.length > 0) {
+        newEntities.push({ type: 'group', value: matches[0].group.name });
+      } else {
+        // Also try the raw text
+        const rawMatches = findGroup(text.trim(), context.groups);
+        if (rawMatches.length > 0) {
+          newEntities.push({ type: 'group', value: rawMatches[0].group.name });
+        }
+      }
+    }
+
+    if (missing.includes('email')) {
+      const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.]+/);
+      if (emailMatch) {
+        newEntities.push({ type: 'email', value: emailMatch[0] });
+      }
+    }
+
+    if (missing.includes('person')) {
+      // Treat the stripped text as a person name
+      const name = stripped || text.trim();
+      if (name && name.length > 0 && !/^[\d\s]+$/.test(name)) {
+        newEntities.push({ type: 'person', value: name });
+      }
+    }
+
+    if (missing.includes('message')) {
+      newEntities.push({ type: 'message', value: text.trim() });
+    }
+
+    if (newEntities.length === 0) return null;
+
+    // Merge and check if we're complete
+    conversationState.mergeEntities(newEntities);
+    const updatedPending = conversationState.getPending();
+    if (!updatedPending) return null;
+
+    return this.resolveIntentOrAskMore(
+      updatedPending.originalText,
+      updatedPending.intent,
+      updatedPending.entities,
+      context,
+    );
+  }
+
+  /**
+   * Check if all required entities are present. If yes, resolve the intent.
+   * If no, set up a new pending asking for the next missing piece.
+   */
+  private resolveIntentOrAskMore(
+    originalText: string,
+    intent: GossipIntent,
+    entities: ExtractedEntity[],
+    context: GossipContext,
+  ): GossipResponse {
+    const missing = this.getMissingEntities(intent, entities, context);
+
+    if (missing.length === 0) {
+      // All entities present — execute
+      conversationState.reset();
+      return this.resolveIntent(originalText, intent, entities, context);
+    }
+
+    // Still need more — ask for the next missing entity
+    const nextMissing = missing[0];
+    const prompts: Record<string, { message: string; options: import('./types').GossipOption[] }> = {
+      group: {
+        message: 'Which group?',
+        options: context.groups.slice(0, 4).map(g => ({
+          label: g.name,
+          description: `Select ${g.name}`,
+          command: {
+            type: 'open_chat' as const,
+            payload: JSON.stringify({ groupId: g.id }),
+            rawText: g.name,
+            confidence: 1,
+          },
+        })),
+      },
+      email: {
+        message: `What's ${entities.find(e => e.type === 'person')?.value || 'their'} email address?`,
+        options: [],
+      },
+      person: {
+        message: 'Who would you like to add?',
+        options: [],
+      },
+      message: {
+        message: 'What message would you like to send?',
+        options: [],
+      },
+    };
+
+    const prompt = prompts[nextMissing] || { message: `What's the ${nextMissing}?`, options: [] };
+    conversationState.setPending(originalText, intent, prompt.options, entities, missing);
+    return { type: 'clarify', message: prompt.message, options: prompt.options };
+  }
+
+  /**
+   * Determine which entity types are still needed for a given intent.
+   */
+  private getMissingEntities(
+    intent: GossipIntent,
+    entities: ExtractedEntity[],
+    context: GossipContext,
+  ): EntityType[] {
+    const has = (type: EntityType) => entities.some(e => e.type === type);
+    const missing: EntityType[] = [];
+    const inChatRoom = context.currentScreen === 'ChatRoom' && !!context.currentGroup;
+
+    switch (intent) {
+      case 'send_message':
+        if (!has('message')) missing.push('message');
+        if (!has('group') && !inChatRoom) missing.push('group');
+        break;
+      case 'add_member':
+        if (!has('email')) missing.push('email');
+        if (!has('group') && !inChatRoom) missing.push('group');
+        break;
+      case 'call_group':
+        if (!has('group') && !inChatRoom) missing.push('group');
+        break;
+      case 'record_voice':
+        if (!has('group') && !inChatRoom) missing.push('group');
+        break;
+      case 'chat_with_person':
+      case 'private_chat':
+        if (!has('person')) missing.push('person');
+        break;
+      case 'create_group':
+        if (!has('group')) missing.push('group');
+        break;
+      case 'query_groups':
+        if (!has('person')) missing.push('person');
+        break;
+      case 'query_members':
+        if (!has('group')) missing.push('group');
+        break;
+    }
+
+    return missing;
   }
 
   /**

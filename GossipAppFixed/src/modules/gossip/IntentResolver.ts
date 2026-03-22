@@ -280,7 +280,7 @@ function normalizeWords(text: string): string[] {
 }
 
 /** Extract entities from text based on detected intent. */
-function extractEntities(text: string, intent: GossipIntent): ExtractedEntity[] {
+export function extractEntities(text: string, intent: GossipIntent): ExtractedEntity[] {
   const entities: ExtractedEntity[] = [];
   const lower = text.toLowerCase();
 

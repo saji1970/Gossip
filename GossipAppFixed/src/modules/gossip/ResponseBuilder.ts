@@ -516,9 +516,17 @@ export function resolveFollowUp(
 ): number {
   const lower = text.toLowerCase().trim();
 
-  // "private" → match option labeled "Private chat"
+  // Strip common prepositions that precede a group/person name
+  const stripped = lower
+    .replace(/^(in|to|for|from|at|on|the|into)\s+/i, '')
+    .replace(/\s+(group|chat|one)$/i, '')
+    .trim();
+
+  // Bidirectional substring: "Poker Group" includes "poker", and "in poker group" includes "poker group"
   for (let i = 0; i < options.length; i++) {
-    if (options[i].label.toLowerCase().includes(lower)) return i;
+    const label = options[i].label.toLowerCase();
+    if (label.includes(lower) || lower.includes(label)) return i;
+    if (stripped && (label.includes(stripped) || stripped.includes(label))) return i;
   }
 
   // "the first one", "1", "first"
@@ -537,9 +545,22 @@ export function resolveFollowUp(
     return options.length > 0 ? 0 : -1;
   }
 
-  // Try matching by group or person name within options
+  // Try matching by group or person name within descriptions (bidirectional)
   for (let i = 0; i < options.length; i++) {
-    if (options[i].description.toLowerCase().includes(lower)) return i;
+    const desc = options[i].description.toLowerCase();
+    if (desc.includes(lower) || lower.includes(desc)) return i;
+    if (stripped && (desc.includes(stripped) || stripped.includes(desc))) return i;
+  }
+
+  // Word-level fuzzy: if any significant word (3+ chars) from user text appears in a label
+  const userWords = stripped.split(/\s+/).filter(w => w.length >= 3);
+  if (userWords.length > 0) {
+    for (let i = 0; i < options.length; i++) {
+      const label = options[i].label.toLowerCase();
+      for (const word of userWords) {
+        if (label.includes(word)) return i;
+      }
+    }
   }
 
   return -1;

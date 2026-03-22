@@ -82,6 +82,10 @@ export interface PendingClarification {
   options: GossipOption[];
   createdAt: number;
   turnCount: number;
+  /** Entities accumulated across conversation turns. */
+  entities: ExtractedEntity[];
+  /** Entity types still needed before the intent can execute. */
+  missingEntities: EntityType[];
 }
 
 // ── Learning ──
