@@ -11,6 +11,7 @@ import {
   ActionExecuteResult,
 } from './types';
 import { learningStore } from './LearningStore';
+import { voiceTrainingStore } from './VoiceTrainingStore';
 import { conversationState } from './ConversationState';
 import { conversationHistory } from './ConversationHistory';
 import { userPersonalityProfile } from './UserPersonalityProfile';
@@ -33,6 +34,7 @@ class GossipBot {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     await learningStore.load();
+    await voiceTrainingStore.load();
     await conversationHistory.load();
     await userPersonalityProfile.load();
     await gossipPersonality.load();
@@ -74,30 +76,18 @@ class GossipBot {
       return response;
     }
 
-    // 2. Try backend command/execute (single-shot: classify + execute)
-    const backendActionResult = await this.tryBackendCommandExecute(trimmed, context);
-    if (backendActionResult) {
-      const response = this.handleActionResult(backendActionResult, trimmed);
-      userPersonalityProfile.recordCommandUsage(backendActionResult.intent as GossipIntent);
+    // 1.5. Check trained voice phrases (highest priority for custom commands)
+    const trainingMatch = voiceTrainingStore.matchInput(trimmed);
+    if (trainingMatch && trainingMatch.confidence >= 0.7) {
+      const entities = IntentResolver.extractEntities(trimmed, trainingMatch.intent);
+      const response = this.resolveIntent(trimmed, trainingMatch.intent, entities, context);
       this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
       return response;
     }
 
-    // 3. Try backend NLP classification only (4s timeout)
-    const backendResult = await this.tryBackendNLP(trimmed, context);
-    if (backendResult) {
-      const intent = backendResult.intent as GossipIntent;
-      const entities: ExtractedEntity[] = backendResult.entities.map(e => ({
-        type: e.type as ExtractedEntity['type'],
-        value: e.value,
-      }));
-      userPersonalityProfile.recordCommandUsage(intent);
-      const response = this.resolveIntent(trimmed, intent, entities, context);
-      this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
-      return response;
-    }
+    // 2. Try local parsing FIRST (instant — no network wait)
 
-    // 4. Try existing regex parser as fast path
+    // 2a. Regex parser
     const regexCmd = parseCommand(trimmed);
     if (regexCmd.type !== 'unknown' && regexCmd.confidence >= 0.7) {
       const resolved = this.checkAndResolve(regexCmd, context);
@@ -113,7 +103,7 @@ class GossipBot {
       return response;
     }
 
-    // 5. Try fuzzy intent resolver (with compound entity detection)
+    // 2b. Fuzzy intent resolver (with compound entity detection)
     const intentResult = IntentResolver.resolve(trimmed);
     if (intentResult.confidence >= 0.7) {
       // Merge compound entities (e.g. "create group X and add Y")
@@ -142,7 +132,32 @@ class GossipBot {
       return response;
     }
 
-    // 6. Casual chat fallback
+    // 3. Local parsing uncertain — try backend (with reduced timeouts)
+
+    // 3a. Backend command/execute (single-shot: classify + execute)
+    const backendActionResult = await this.tryBackendCommandExecute(trimmed, context);
+    if (backendActionResult) {
+      const response = this.handleActionResult(backendActionResult, trimmed);
+      userPersonalityProfile.recordCommandUsage(backendActionResult.intent as GossipIntent);
+      this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
+      return response;
+    }
+
+    // 3b. Backend NLP classification only
+    const backendResult = await this.tryBackendNLP(trimmed, context);
+    if (backendResult) {
+      const intent = backendResult.intent as GossipIntent;
+      const entities: ExtractedEntity[] = backendResult.entities.map(e => ({
+        type: e.type as ExtractedEntity['type'],
+        value: e.value,
+      }));
+      userPersonalityProfile.recordCommandUsage(intent);
+      const response = this.resolveIntent(trimmed, intent, entities, context);
+      this.recordExchangeFromResponse(response, !isFrustrated, isPositive);
+      return response;
+    }
+
+    // 4. Casual chat fallback
     const casualResponse = ResponseBuilder.buildCasualResponse(
       trimmed,
       gossipPersonality.getMood(),
@@ -234,7 +249,7 @@ class GossipBot {
 
       const result = await Promise.race([
         api.executeCommand(text, groups, context.currentScreen),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 2000)),
       ]);
 
       if (!result) {
@@ -598,6 +613,20 @@ class GossipBot {
             },
           );
         }
+
+        // If we have a group entity, resolve it and call directly
+        const callGroupEntity = entities.find(e => e.type === 'group');
+        if (callGroupEntity) {
+          const matches = findGroup(callGroupEntity.value, context.groups);
+          if (matches.length > 0) {
+            const g = matches[0].group;
+            return ResponseBuilder.buildExecute(
+              `Calling ${g.name}`,
+              { type: 'call_group', payload: g.id, rawText, confidence: 1 },
+            );
+          }
+        }
+
         if (context.groups.length === 0) {
           return { type: 'info', message: "You don't have any groups to call yet" };
         }
@@ -615,6 +644,25 @@ class GossipBot {
             { type: 'send_message', payload: msg, rawText, confidence: 1 },
           );
         }
+
+        // If we have a group entity, resolve it and send directly
+        const sendGroupEntity = entities.find(e => e.type === 'group');
+        if (sendGroupEntity) {
+          const matches = findGroup(sendGroupEntity.value, context.groups);
+          if (matches.length > 0) {
+            const g = matches[0].group;
+            return ResponseBuilder.buildExecute(
+              `Sending to ${g.name}`,
+              {
+                type: 'send_message',
+                payload: JSON.stringify({ groupId: g.id, message: msg }),
+                rawText: `send ${msg} in ${g.name}`,
+                confidence: 1,
+              },
+            );
+          }
+        }
+
         if (context.groups.length === 0) {
           return { type: 'info', message: "You don't have any groups yet" };
         }
@@ -842,10 +890,12 @@ class GossipBot {
     }
 
     // Try matching against presented options (pill taps + typed labels)
+    console.log(`[GossipBot] handleFollowUp: "${text}" for ${pending.intent}, ${pending.options.length} options, missing=[${pending.missingEntities}]`);
     const matchIdx = ResponseBuilder.resolveFollowUp(text, pending.options);
     if (matchIdx >= 0) {
       const option = pending.options[matchIdx];
       conversationState.reset();
+      console.log(`[GossipBot] Follow-up matched option[${matchIdx}]: "${option.label}" → cmd=${option.command.type}`);
 
       await learningStore.recordResolution(
         pending.originalText,
@@ -863,11 +913,13 @@ class GossipBot {
     // Escape hatch: if user's text is a high-confidence new intent, reset and process fresh
     const freshIntent = IntentResolver.resolve(text);
     if (freshIntent.confidence >= 0.8 && freshIntent.intent !== 'casual_chat' && freshIntent.intent !== 'unknown') {
+      console.log(`[GossipBot] Escape hatch: fresh intent=${freshIntent.intent} (${freshIntent.confidence})`);
       conversationState.reset();
       return this.processInput(text, context);
     }
 
     // Fallback: try to extract the missing entity from the follow-up text
+    console.log(`[GossipBot] resolveFollowUp returned -1, trying entity merge...`);
     const mergeResult = this.tryEntityMerge(text, pending, context);
     if (mergeResult) {
       return mergeResult;
@@ -932,9 +984,13 @@ class GossipBot {
       newEntities.push({ type: 'message', value: text.trim() });
     }
 
-    if (newEntities.length === 0) return null;
+    if (newEntities.length === 0) {
+      console.log('[GossipBot] tryEntityMerge: no entities extracted');
+      return null;
+    }
 
     // Merge and check if we're complete
+    console.log(`[GossipBot] tryEntityMerge: extracted [${newEntities.map(e => `${e.type}=${e.value}`).join(', ')}]`);
     conversationState.mergeEntities(newEntities);
     const updatedPending = conversationState.getPending();
     if (!updatedPending) return null;
@@ -958,11 +1014,14 @@ class GossipBot {
     context: GossipContext,
   ): GossipResponse {
     const missing = this.getMissingEntities(intent, entities, context);
+    console.log(`[GossipBot] resolveIntentOrAskMore: intent=${intent}, entities=[${entities.map(e => `${e.type}=${e.value}`).join(', ')}], missing=[${missing}]`);
 
     if (missing.length === 0) {
       // All entities present — execute
       conversationState.reset();
-      return this.resolveIntent(originalText, intent, entities, context);
+      const result = this.resolveIntent(originalText, intent, entities, context);
+      console.log(`[GossipBot] resolveIntent result: type=${result.type}, hasCommand=${!!result.command}, cmdType=${result.command?.type}`);
+      return result;
     }
 
     // Still need more — ask for the next missing entity
@@ -1061,7 +1120,7 @@ class GossipBot {
 
       const result = await Promise.race([
         api.classifyIntent(text, groups, context.currentScreen),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
       ]);
 
       if (!result) {
